@@ -1,0 +1,30 @@
+# Claude Code artifacts
+.claude
+
+# Environment files with secrets
+*.env
+.env*
+**/beeminder.env
+
+# Private keys and certificates
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cert
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs with potential sensitive data
+*.log
+logs/
+
+# Configuration files that might contain secrets
+config.json
+config.yml
+config.yaml
+settings.json

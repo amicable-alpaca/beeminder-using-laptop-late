@@ -32,7 +32,7 @@ config.yaml
 settings.json
 
 # Tamper-resistant system files
-sot_database.db
+# Note: sot_database.db is tracked in git as the public source of truth
 hsot_database.db
 
 # Python cache

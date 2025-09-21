@@ -60,11 +60,14 @@ jobs:
         if [ -f "sot_database.db" ]; then
           git add sot_database.db
           if ! git diff --staged --quiet; then
-            git commit -m "Update SoT database - $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+            git commit -m "$(cat <<'EOF'
+        Update SoT database - $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
-🤖 Automated sync via GitHub Actions
+        🤖 Automated sync via GitHub Actions
 
-Co-Authored-By: Claude <noreply@anthropic.com>"
+        Co-Authored-By: Claude <noreply@anthropic.com>
+        EOF
+        )"
             git push
           else
             echo "No database changes to commit"

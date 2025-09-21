@@ -389,11 +389,46 @@ def main():
 
     args = parser.parse_args()
 
-    syncer = NightLoggerSync()
-
     if args.command == 'download-hsot-db':
-        syncer.download_hsot_database()
+        # For download, we only need GitHub credentials
+        github_token = os.getenv('GITHUB_TOKEN')
+        if not github_token:
+            raise ValueError("Missing GITHUB_TOKEN environment variable")
+
+        # Just do the download directly without full syncer initialization
+        github_repo = os.getenv('GITHUB_REPOSITORY', 'amicable-alpaca/beeminder-using-laptop-late')
+
+        import requests
+        headers = {
+            'Authorization': f'token {github_token}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+
+        print("🔍 Checking for HSoT database in night-logger-upload branch...")
+
+        try:
+            # Try to download from the upload branch
+            url = f'https://api.github.com/repos/{github_repo}/contents/night_logs.db?ref=night-logger-upload'
+            response = requests.get(url, headers=headers)
+
+            if response.status_code == 200:
+                import base64
+                content = response.json()['content']
+                db_data = base64.b64decode(content)
+
+                hsot_path = Path("hsot_database.db")
+                with open(hsot_path, 'wb') as f:
+                    f.write(db_data)
+
+                print(f"✅ Downloaded HSoT database ({len(db_data)} bytes)")
+            else:
+                print(f"ℹ️  No HSoT database found in upload branch (HTTP {response.status_code})")
+
+        except Exception as e:
+            print(f"⚠️  Failed to download HSoT database: {e}")
+
     elif args.command == 'sync':
+        syncer = NightLoggerSync()
         syncer.run_sync()
 
 

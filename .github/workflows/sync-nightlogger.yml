@@ -1,0 +1,72 @@
+name: Sync Night Logger Data
+
+on:
+  # Trigger when night logger detects usage
+  repository_dispatch:
+    types: [night-logger-sync]
+
+  # Daily sync at 12 PM NYC time (EST/EDT aware)
+  schedule:
+    # 12 PM EST (UTC-5) = 17:00 UTC in winter
+    # 12 PM EDT (UTC-4) = 16:00 UTC in summer
+    # Using 17:00 UTC to cover EST, close enough for EDT
+    - cron: '0 17 * * *'
+
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+jobs:
+  sync-data:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: Download HSoT database from computer
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        python sync_nightlogger.py download-hsot-db
+
+    - name: Sync databases and Beeminder
+      env:
+        BEEMINDER_USERNAME: ${{ secrets.BEEMINDER_USERNAME }}
+        BEEMINDER_AUTH_TOKEN: ${{ secrets.BEEMINDER_AUTH_TOKEN }}
+        BEEMINDER_GOAL_SLUG: ${{ secrets.BEEMINDER_GOAL_SLUG }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        python sync_nightlogger.py sync
+
+    - name: Commit and push SoT database if updated
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+
+        if [ -f "sot_database.db" ]; then
+          git add sot_database.db
+          if ! git diff --staged --quiet; then
+            git commit -m "Update SoT database - $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+🤖 Automated sync via GitHub Actions
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+            git push
+          else
+            echo "No database changes to commit"
+          fi
+        fi

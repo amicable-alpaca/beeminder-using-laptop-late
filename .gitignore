@@ -16,6 +16,8 @@
 
 # Database files
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 
@@ -28,3 +30,19 @@ config.json
 config.yml
 config.yaml
 settings.json
+
+# Tamper-resistant system files
+sot_database.db
+hsot_database.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/

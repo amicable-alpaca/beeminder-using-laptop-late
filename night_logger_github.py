@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""
+night_logger_github.py - Tamper-Resistant Version
+
+What it does
+------------
+- Every 5 seconds, logs whether the local time is between 23:00–03:59.
+- On the first 1 of the (local) day, it:
+  1) Uploads the local database to GitHub
+  2) Triggers GitHub Actions workflow for sync with Beeminder
+  3) Exits cleanly (so systemd won't restart it with Restart=on-failure).
+
+- The local SQLite DB is the Highest Source of Truth (HSoT):
+  - `logs` keeps the raw 0/1 samples
+  - `posts` keeps local days (YYYY-MM-DD) that have been posted
+
+Usage
+-----
+    python3 night_logger_github.py [--verbose] [--interval 5] [--db night_logs.db]
+    # GitHub credentials via env:
+    GITHUB_TOKEN=... GITHUB_REPO=... python3 night_logger_github.py
+
+System deps
+-----------
+- requests (install with: sudo apt-get install -y python3-requests)
+"""
+
+import argparse
+import base64
+import os
+import sqlite3
+import sys
+import time
+from datetime import datetime, timedelta
+from typing import Optional
+import requests  # apt: python3-requests
+
+DB_PATH = "night_logs.db"
+
+CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    logged_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    is_night INTEGER NOT NULL CHECK(is_night IN (0,1))
+);
+CREATE TABLE IF NOT EXISTS posts (
+    ymd TEXT PRIMARY KEY,          -- e.g., 2025-08-15 (LOCAL date)
+    posted_at_utc TEXT NOT NULL    -- when we posted to GitHub (UTC timestamp)
+);
+"""
+
+INSERT_SQL = "INSERT INTO logs (is_night) VALUES (?);"
+
+
+# ----------------- time / db helpers -----------------
+
+def is_between_23_and_359_local(now: datetime) -> bool:
+    """Return True if local time is between 23:00 and 03:59 inclusive."""
+    return now.hour >= 23 or now.hour <= 3
+
+
+def local_ymd(now: datetime) -> str:
+    """Local calendar date as YYYY-MM-DD."""
+    return now.strftime("%Y-%m-%d")
+
+
+def open_db(path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("PRAGMA journal_mode = WAL;")
+    except sqlite3.Error:
+        pass
+    conn.executescript(CREATE_TABLE_SQL)  # create both tables
+    conn.commit()
+    return conn
+
+
+def already_posted_today(conn: sqlite3.Connection, ymd: str) -> bool:
+    cur = conn.execute("SELECT 1 FROM posts WHERE ymd = ? LIMIT 1;", (ymd,))
+    return cur.fetchone() is not None
+
+
+def mark_posted_today(conn: sqlite3.Connection, ymd: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO posts (ymd, posted_at_utc) VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'));",
+        (ymd,),
+    )
+    conn.commit()
+
+
+# ----------------- GitHub API -----------------
+
+class GitHubAPI:
+    """Handle GitHub API operations"""
+
+    def __init__(self, token: str, repo: str):
+        self.token = token
+        self.repo = repo  # format: "owner/repo"
+        self.base_url = "https://api.github.com"
+        self.headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "night-logger-github/1.0"
+        }
+
+    def upload_database_to_branch(self, db_path: str, branch: str = "hsot-database") -> bool:
+        """Upload database file to a specific branch"""
+        try:
+            # Read database file
+            with open(db_path, 'rb') as f:
+                db_content = f.read()
+
+            # Encode as base64
+            db_base64 = base64.b64encode(db_content).decode('utf-8')
+
+            # Check if branch exists
+            branch_url = f"{self.base_url}/repos/{self.repo}/git/refs/heads/{branch}"
+            branch_response = requests.get(branch_url, headers=self.headers)
+
+            if branch_response.status_code == 404:
+                # Create branch from main
+                main_ref_url = f"{self.base_url}/repos/{self.repo}/git/refs/heads/main"
+                main_response = requests.get(main_ref_url, headers=self.headers)
+                main_response.raise_for_status()
+                main_sha = main_response.json()["object"]["sha"]
+
+                # Create new branch
+                create_branch_data = {
+                    "ref": f"refs/heads/{branch}",
+                    "sha": main_sha
+                }
+                create_response = requests.post(
+                    f"{self.base_url}/repos/{self.repo}/git/refs",
+                    headers=self.headers,
+                    json=create_branch_data
+                )
+                create_response.raise_for_status()
+                print(f"✅ Created branch '{branch}'")
+
+            # Get current file SHA if it exists
+            file_url = f"{self.base_url}/repos/{self.repo}/contents/hsot_database.db"
+            file_params = {"ref": branch}
+            file_response = requests.get(file_url, headers=self.headers, params=file_params)
+
+            file_data = {
+                "message": f"Update HSoT database - {datetime.utcnow().isoformat()}Z",
+                "content": db_base64,
+                "branch": branch
+            }
+
+            if file_response.status_code == 200:
+                # File exists, update it
+                file_data["sha"] = file_response.json()["sha"]
+
+            # Upload/update file
+            upload_response = requests.put(file_url, headers=self.headers, json=file_data)
+            upload_response.raise_for_status()
+
+            print(f"✅ Database uploaded to branch '{branch}'")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to upload database: {e}")
+            return False
+
+    def trigger_workflow(self, event_type: str = "night-logger-sync") -> bool:
+        """Trigger GitHub Actions workflow via repository dispatch"""
+        try:
+            url = f"{self.base_url}/repos/{self.repo}/dispatches"
+            data = {
+                "event_type": event_type,
+                "client_payload": {
+                    "triggered_at": datetime.utcnow().isoformat() + "Z",
+                    "trigger_source": "night_logger_github"
+                }
+            }
+
+            response = requests.post(url, headers=self.headers, json=data)
+            response.raise_for_status()
+
+            print(f"✅ Triggered GitHub Actions workflow: {event_type}")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to trigger workflow: {e}")
+            return False
+
+
+# ----------------- main loop -----------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Log 23:00–03:59 and trigger GitHub Actions sync.")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print each sample as it is logged.")
+    parser.add_argument("--interval", type=float, default=5.0, help="Sampling interval in seconds (default: 5).")
+    parser.add_argument("--db", default=DB_PATH, help=f"SQLite DB path (default: {DB_PATH}).")
+
+    # GitHub credentials (env only for security)
+    parser.add_argument("--github-token", default=os.getenv("GITHUB_TOKEN"), help="GitHub token (or set GITHUB_TOKEN).")
+    parser.add_argument("--github-repo", default=os.getenv("GITHUB_REPO"), help="GitHub repo owner/name (or set GITHUB_REPO).")
+
+    args = parser.parse_args()
+
+    conn = open_db(args.db)
+    cursor = conn.cursor()
+
+    try:
+        if args.verbose:
+            print("Starting night logger (GitHub mode)… Press Ctrl+C to stop.")
+
+        while True:
+            now = datetime.now()  # local device time
+            value = 1 if is_between_23_and_359_local(now) else 0
+            cursor.execute(INSERT_SQL, (value,))
+            conn.commit()
+
+            if args.verbose:
+                print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] logged is_night={value}", flush=True)
+
+            if value == 1:
+                # Treat 00:00-03:59 as part of previous day's night session
+                if now.hour <= 3:
+                    ymd = local_ymd(now - timedelta(days=1))
+                else:
+                    ymd = local_ymd(now)
+
+                # Once-per-night guard
+                if already_posted_today(conn, ymd):
+                    if args.verbose:
+                        print(f"Already posted for {ymd}; exiting without posting again.")
+                    sys.exit(0)
+
+                # Must have GitHub credentials to trigger sync
+                if not (args.github_token and args.github_repo):
+                    print(
+                        "is_night=1 detected, but GitHub credentials are missing. "
+                        "Set GITHUB_TOKEN and GITHUB_REPO environment variables.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(2)
+
+                # Upload database and trigger GitHub Actions
+                github_api = GitHubAPI(args.github_token, args.github_repo)
+
+                try:
+                    # Upload current database to GitHub
+                    if args.verbose:
+                        print(f"Uploading database to GitHub...")
+
+                    upload_success = github_api.upload_database_to_branch(args.db)
+                    if not upload_success:
+                        print("Failed to upload database to GitHub", file=sys.stderr)
+                        sys.exit(1)
+
+                    # Trigger GitHub Actions workflow
+                    if args.verbose:
+                        print(f"Triggering GitHub Actions workflow...")
+
+                    trigger_success = github_api.trigger_workflow()
+                    if not trigger_success:
+                        print("Failed to trigger GitHub Actions workflow", file=sys.stderr)
+                        sys.exit(1)
+
+                    # Mark as posted locally
+                    mark_posted_today(conn, ymd)
+
+                    if args.verbose:
+                        print(f"Triggered GitHub sync for date={ymd}. Exiting.")
+
+                    sys.exit(0)
+
+                except Exception as e:
+                    print(f"Failed to sync with GitHub: {e}", file=sys.stderr)
+                    sys.exit(1)
+
+            time.sleep(args.interval)
+
+    except KeyboardInterrupt:
+        if args.verbose:
+            print("\nStopping. Goodbye!")
+    finally:
+        try:
+            cursor.close()
+        finally:
+            conn.close()
+
+
+if __name__ == "__main__":
+    main()

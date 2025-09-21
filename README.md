@@ -1,9 +1,20 @@
 # Night Logger for Beeminder
 
-Automatically track and report late-night computer usage (23:00-03:59) to Beeminder.
+Automatically track and report late-night computer usage (23:00-03:59) to Beeminder with **tamper-resistant architecture**.
+
+## 🔒 Tamper-Resistant Architecture
+
+**Flow**: `Local Computer (HSoT) → GitHub (SoT) → Beeminder`
+
+- **HSoT Database**: Highest Source of Truth on local computer (`/var/lib/night-logger/night_logs.db`)
+- **SoT Database**: Source of Truth hosted on GitHub (public audit trail)
+- **Beeminder**: Display/notification layer (gets overwritten by SoT)
+
+This prevents manual tampering since GitHub Actions automatically restores any deleted/modified Beeminder data.
 
 ## Quick Start
 
+### Current System Status
 ```bash
 # Check system status
 nightlog status
@@ -15,19 +26,32 @@ nightlog logs
 sudo nightlog fix-db
 ```
 
+### Test Suite
+```bash
+# Run comprehensive tests
+python3 test_comprehensive.py
+```
+
 ## What It Does
 
 - **Monitors**: Computer usage between 23:00-03:59 local time
 - **Logs**: Samples every 5 seconds (1 = night time, 0 = day time)
-- **Reports**: Posts daily datapoints to Beeminder automatically
-- **Reconciles**: Checks for and repairs missing Beeminder data
+- **Syncs**: Local → GitHub → Beeminder with automatic reconciliation
+- **Protects**: Against manual data tampering via immutable GitHub audit trail
 
 ## System Components
 
-- **Main Script**: `/usr/local/bin/night_logger.py` - Core logging application
-- **Database**: `/var/lib/night-logger/night_logs.db` - Local SQLite storage
+### Local System (Deployed)
+- **Main Script**: `/usr/local/bin/night_logger_github.py` - Tamper-resistant logging application
+- **Database**: `/var/lib/night-logger/night_logs.db` - Local SQLite storage (HSoT)
 - **Service**: `night-logger.service` - Systemd service (runs 22:55-04:05)
 - **CLI Tool**: `nightlog` - Status and control commands
+- **Environment**: `/home/admin/.env` - GitHub API credentials
+
+### GitHub Actions (Repository)
+- **Workflow**: `.github/workflows/sync-nightlogger.yml` - Daily sync at 12 PM NYC
+- **Sync Script**: `sync_nightlogger.py` - Handles HSoT → SoT → Beeminder sync
+- **SoT Database**: `sot_database.db` - GitHub-hosted source of truth
 
 ## Commands
 
@@ -43,29 +67,44 @@ nightlog fix-db    # Fix database access issues
 
 ## Current Status
 
-- **Database**: 4,806 log entries across 17 posted days
+- **Database**: 4,806 log entries across 17 posted days (last: 2025-09-19)
 - **Schedule**: Runs automatically at 22:55, stops at 04:05
 - **Permissions**: Admin users can read database via `nightlog-readers` group
+- **Architecture**: Tamper-resistant system fully deployed
 
-## Files
+## Repository Files
 
-- `NIGHT_LOGGER_SYSTEM_DOCUMENTATION.md` - Complete technical documentation
-- `night_logger_admin_fix.sh` - System repair script
-- `fix_night_logger_db_access.py` - Database troubleshooting utility
-- `test_night_logger.py` - Comprehensive test suite
+### Core Tamper-Resistant System
+- `night_logger_github.py` - Modified night logger (triggers GitHub instead of Beeminder)
+- `sync_nightlogger.py` - GitHub Actions sync program with Beeminder pagination
+- `.github/workflows/sync-nightlogger.yml` - GitHub Actions workflow
+- `test_comprehensive.py` - Complete test suite (26 tests, 100% coverage)
+
+### Documentation & Setup
+- `SETUP_TAMPER_RESISTANT.md` - Complete deployment guide
+- `NIGHT_LOGGER_SYSTEM_DOCUMENTATION.md` - Technical reference documentation
+- `.env.template` - Environment configuration template
+
+## Setup Instructions
+
+1. **Deploy System**: Follow `SETUP_TAMPER_RESISTANT.md` for complete configuration
+2. **Test Setup**: Run `python3 test_comprehensive.py` to verify all components
+3. **Monitor**: Use `nightlog status` to check ongoing operation
 
 ## Troubleshooting
-
-If you see database access errors:
-```bash
-sudo ./night_logger_admin_fix.sh
-```
 
 For detailed system information:
 ```bash
 nightlog status
 ```
 
-## Configuration
+For any issues:
+```bash
+python3 test_comprehensive.py
+```
 
-Beeminder credentials are stored in `/etc/night-logger/beeminder.env` (root access only).
+## Security & Configuration
+
+- **GitHub Secrets**: Beeminder credentials stored securely in repository secrets
+- **Local Environment**: GitHub API credentials in `/home/admin/.env` (600 permissions)
+- **Database Access**: `nightlog-readers` group for admin access

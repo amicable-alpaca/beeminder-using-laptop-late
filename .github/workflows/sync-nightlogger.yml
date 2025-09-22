@@ -15,6 +15,9 @@ on:
   # Allow manual triggering for testing
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   sync-data:
     runs-on: ubuntu-latest

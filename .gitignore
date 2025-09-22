@@ -16,6 +16,7 @@
 
 # Database files
 *.db
+!sot_database.db
 *.db-shm
 *.db-wal
 *.sqlite

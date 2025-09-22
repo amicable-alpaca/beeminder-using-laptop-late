@@ -94,8 +94,8 @@ class ViolationsSync:
             return json.load(f)
 
     def cleanup_unauthorized_datapoints(self, violations_data: Dict) -> None:
-        """Remove Beeminder datapoints that don't exist in SoT violations data"""
-        print("🧹 Cleaning up unauthorized Beeminder datapoints...")
+        """Remove ALL Beeminder datapoints that don't exist in SoT violations data (tamper-resistant)"""
+        print("🧹 Enforcing tamper resistance - removing unauthorized datapoints...")
 
         # Get all violations from SoT (authorized dates)
         all_violations = violations_data.get('violations', [])
@@ -109,23 +109,30 @@ class ViolationsSync:
         authorized_datapoints = []
 
         for dp in beeminder_datapoints:
-            comment = (dp.get('comment') or '').lower()
+            # Check ALL datapoints for tamper resistance (not just night_logger ones)
+            timestamp = dp.get('timestamp')
+            if timestamp:
+                try:
+                    dt = datetime.fromtimestamp(int(float(timestamp)))
+                    date_str = dt.strftime('%Y-%m-%d')
 
-            # Only process night logger datapoints (leave manual entries alone)
-            if 'night_logger' in comment or 'night logger' in comment or 'auto-logged' in comment:
-                timestamp = dp.get('timestamp')
-                if timestamp:
-                    try:
-                        dt = datetime.fromtimestamp(int(float(timestamp)))
-                        date_str = dt.strftime('%Y-%m-%d')
-
-                        if date_str not in authorized_dates:
-                            unauthorized_datapoints.append(dp)
-                        else:
-                            authorized_datapoints.append((date_str, dp))
-                    except (ValueError, TypeError):
-                        # Invalid timestamp, mark for deletion
+                    if date_str not in authorized_dates:
+                        # Any datapoint on unauthorized date gets deleted
                         unauthorized_datapoints.append(dp)
+                    else:
+                        # Even on authorized dates, only keep night_logger entries
+                        comment = (dp.get('comment') or '').lower()
+                        if 'night_logger' in comment or 'night logger' in comment or 'auto-logged' in comment:
+                            authorized_datapoints.append((date_str, dp))
+                        else:
+                            # Manual entry on violation date - delete for tamper resistance
+                            unauthorized_datapoints.append(dp)
+                except (ValueError, TypeError):
+                    # Invalid timestamp, mark for deletion
+                    unauthorized_datapoints.append(dp)
+            else:
+                # No timestamp, mark for deletion
+                unauthorized_datapoints.append(dp)
 
         # Check for duplicate authorized datapoints (multiple entries for same date)
         from collections import defaultdict
@@ -133,13 +140,14 @@ class ViolationsSync:
         for date_str, dp in authorized_datapoints:
             by_date[date_str].append(dp)
 
-        # Keep only the most recent datapoint per date
+        # Keep only one datapoint per date (remove all duplicates)
         for date_str, dps in by_date.items():
             if len(dps) > 1:
-                # Sort by timestamp, keep the most recent
-                dps.sort(key=lambda x: int(float(x['timestamp'])))
-                # Mark older ones for deletion
-                unauthorized_datapoints.extend(dps[:-1])
+                # Sort by timestamp, then by ID for deterministic ordering
+                dps.sort(key=lambda x: (int(float(x['timestamp'])), x['id']))
+                # Mark all but the last one for deletion
+                for dp in dps[:-1]:
+                    unauthorized_datapoints.append(dp)
 
         if unauthorized_datapoints:
             print(f"🗑️  Found {len(unauthorized_datapoints)} unauthorized datapoints to remove")

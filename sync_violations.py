@@ -93,12 +93,90 @@ class ViolationsSync:
         with open(violations_path, 'r') as f:
             return json.load(f)
 
+    def cleanup_unauthorized_datapoints(self, violations_data: Dict) -> None:
+        """Remove Beeminder datapoints that don't exist in SoT violations data"""
+        print("🧹 Cleaning up unauthorized Beeminder datapoints...")
+
+        # Get all violations from SoT (authorized dates)
+        all_violations = violations_data.get('violations', [])
+        authorized_dates = {v['date'] for v in all_violations}
+
+        # Get existing Beeminder datapoints
+        beeminder_datapoints = self.beeminder.get_goal_datapoints(self.beeminder_goal)
+
+        # Find night_logger datapoints that shouldn't exist
+        unauthorized_datapoints = []
+        authorized_datapoints = []
+
+        for dp in beeminder_datapoints:
+            comment = (dp.get('comment') or '').lower()
+
+            # Only process night logger datapoints (leave manual entries alone)
+            if 'night_logger' in comment or 'night logger' in comment or 'auto-logged' in comment:
+                timestamp = dp.get('timestamp')
+                if timestamp:
+                    try:
+                        dt = datetime.fromtimestamp(int(float(timestamp)))
+                        date_str = dt.strftime('%Y-%m-%d')
+
+                        if date_str not in authorized_dates:
+                            unauthorized_datapoints.append(dp)
+                        else:
+                            authorized_datapoints.append((date_str, dp))
+                    except (ValueError, TypeError):
+                        # Invalid timestamp, mark for deletion
+                        unauthorized_datapoints.append(dp)
+
+        # Check for duplicate authorized datapoints (multiple entries for same date)
+        from collections import defaultdict
+        by_date = defaultdict(list)
+        for date_str, dp in authorized_datapoints:
+            by_date[date_str].append(dp)
+
+        # Keep only the most recent datapoint per date
+        for date_str, dps in by_date.items():
+            if len(dps) > 1:
+                # Sort by timestamp, keep the most recent
+                dps.sort(key=lambda x: int(float(x['timestamp'])))
+                # Mark older ones for deletion
+                unauthorized_datapoints.extend(dps[:-1])
+
+        if unauthorized_datapoints:
+            print(f"🗑️  Found {len(unauthorized_datapoints)} unauthorized datapoints to remove")
+
+            removed_count = 0
+            for dp in unauthorized_datapoints:
+                dp_id = dp.get('id')
+                if dp_id:
+                    timestamp = dp.get('timestamp', 'unknown')
+                    try:
+                        dt = datetime.fromtimestamp(int(float(timestamp)))
+                        date_str = dt.strftime('%Y-%m-%d %H:%M')
+                    except:
+                        date_str = 'invalid timestamp'
+
+                    comment = (dp.get('comment') or '')[:50]
+                    print(f"  Removing: {date_str} - {comment}")
+
+                    success = self.beeminder.delete_datapoint(self.beeminder_goal, str(dp_id))
+                    if success:
+                        removed_count += 1
+
+            print(f"✅ Removed {removed_count}/{len(unauthorized_datapoints)} unauthorized datapoints")
+        else:
+            print("✅ No unauthorized datapoints found")
+
     def sync_violations_to_beeminder(self, violations_file: str) -> None:
-        """Sync violations to Beeminder"""
+        """Sync violations to Beeminder with cleanup of unauthorized datapoints"""
         print("🔄 Syncing violations to Beeminder...")
 
         # Load violations data
         violations_data = self.load_violations(violations_file)
+
+        # Step 1: Clean up unauthorized datapoints (SoT is authoritative)
+        self.cleanup_unauthorized_datapoints(violations_data)
+
+        # Step 2: Add new violations
         unposted_violations = violations_data.get('unposted_violations', [])
 
         if not unposted_violations:
@@ -107,7 +185,7 @@ class ViolationsSync:
 
         print(f"📊 Found {len(unposted_violations)} unposted violations")
 
-        # Get existing Beeminder datapoints to avoid duplicates
+        # Get existing Beeminder datapoints after cleanup
         beeminder_datapoints = self.beeminder.get_goal_datapoints(self.beeminder_goal)
 
         # Extract dates from existing night_logger datapoints

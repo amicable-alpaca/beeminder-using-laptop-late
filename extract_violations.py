@@ -17,7 +17,7 @@ def extract_violations(db_path: str) -> Dict:
         print(f"Database not found: {db_path}")
         return {"violations": [], "last_updated": datetime.utcnow().isoformat() + "Z"}
 
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     cursor = conn.cursor()
 
     # Get all violations with their timestamps
@@ -43,8 +43,12 @@ def extract_violations(db_path: str) -> Dict:
         })
 
     # Check which dates have already been posted to avoid duplicates
-    cursor.execute("SELECT ymd FROM posts ORDER BY ymd")
-    posted_dates = {row[0] for row in cursor.fetchall()}
+    try:
+        cursor.execute("SELECT ymd FROM posts ORDER BY ymd")
+        posted_dates = {row[0] for row in cursor.fetchall()}
+    except sqlite3.OperationalError:
+        # If posts table doesn't exist or is inaccessible, assume no posted dates
+        posted_dates = set()
 
     conn.close()
 

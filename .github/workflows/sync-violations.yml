@@ -1,0 +1,81 @@
+name: Sync Night Logger Violations
+
+on:
+  # Trigger when night logger detects usage
+  repository_dispatch:
+    types: [night-logger-sync]
+
+  # Daily sync at 12 PM NYC time (EST/EDT aware)
+  schedule:
+    # 12 PM EST (UTC-5) = 17:00 UTC in winter
+    # 12 PM EDT (UTC-4) = 16:00 UTC in summer
+    # Using 17:00 UTC to cover EST, close enough for EDT
+    - cron: '0 17 * * *'
+
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-violations:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: Download violations.json from violations-data branch
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        echo "🔍 Checking for violations.json in violations-data branch..."
+
+        # Try to download violations.json from violations-data branch
+        curl -H "Authorization: token $GITHUB_TOKEN" \
+             -H "Accept: application/vnd.github.v3.raw" \
+             "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/violations.json?ref=violations-data" \
+             -o violations.json \
+             --fail --silent --show-error || {
+          echo "ℹ️  No violations.json found in violations-data branch"
+          echo '{"violations": [], "unposted_violations": []}' > violations.json
+        }
+
+        if [ -s violations.json ]; then
+          echo "✅ Downloaded violations.json"
+          python3 -c "import json; data = json.load(open('violations.json')); print(f'Found {len(data.get(\"unposted_violations\", []))} unposted violations')"
+        else
+          echo "ℹ️  Empty or missing violations.json"
+        fi
+
+    - name: Sync violations to Beeminder
+      env:
+        BEEMINDER_USERNAME: ${{ secrets.BEEMINDER_USERNAME }}
+        BEEMINDER_AUTH_TOKEN: ${{ secrets.BEEMINDER_AUTH_TOKEN }}
+        BEEMINDER_GOAL_SLUG: ${{ secrets.BEEMINDER_GOAL_SLUG }}
+      run: |
+        python sync_violations.py --violations-file violations.json
+
+    - name: Update local database with posted violations (optional)
+      run: |
+        # This step could update a local SoT database if needed
+        # For now, we rely on the violations.json as the source of truth
+        echo "✅ Violations sync completed - Beeminder is now up to date"
+
+    - name: Clean up
+      run: |
+        # Remove downloaded violations file for security
+        rm -f violations.json
+        echo "🧹 Cleaned up temporary files"

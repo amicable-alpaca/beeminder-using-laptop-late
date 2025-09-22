@@ -1,18 +1,16 @@
-name: Sync Night Logger Data
+# LEGACY WORKFLOW - Use sync-violations.yml instead
+# This workflow is kept as a fallback for the old database-based approach
+name: Sync Night Logger Data (Legacy)
 
 on:
-  # Trigger when night logger detects usage
-  repository_dispatch:
-    types: [night-logger-sync]
+  # Disabled automatic triggers - use manual dispatch only
+  # repository_dispatch:
+  #   types: [night-logger-sync]
 
-  # Daily sync at 12 PM NYC time (EST/EDT aware)
-  schedule:
-    # 12 PM EST (UTC-5) = 17:00 UTC in winter
-    # 12 PM EDT (UTC-4) = 16:00 UTC in summer
-    # Using 17:00 UTC to cover EST, close enough for EDT
-    - cron: '0 17 * * *'
+  # schedule:
+  #   - cron: '0 17 * * *'
 
-  # Allow manual triggering for testing
+  # Allow manual triggering for testing legacy system
   workflow_dispatch:
 
 permissions:

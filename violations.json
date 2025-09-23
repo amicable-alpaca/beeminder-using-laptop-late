@@ -1,60 +1,74 @@
 {
   "violations": [
     {
-      "date": "2025-09-20",
-      "timestamp": "2025-09-20T03:04:18.510Z",
+      "date": "2025-09-22",
+      "timestamp": "2025-09-23T03:00:00.173Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250920"
+      "daystamp": "20250922"
+    },
+    {
+      "date": "2025-09-21",
+      "timestamp": "2025-09-22T03:00:00.441Z",
+      "value": 1,
+      "comment": "Night logger violation (1 detections)",
+      "daystamp": "20250921"
     },
     {
       "date": "2025-09-19",
-      "timestamp": "2025-09-19T03:16:36.601Z",
+      "timestamp": "2025-09-20T03:04:18.510Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250919"
     },
     {
       "date": "2025-09-18",
-      "timestamp": "2025-09-18T03:00:00.549Z",
+      "timestamp": "2025-09-19T03:16:36.601Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250918"
     },
     {
       "date": "2025-09-17",
-      "timestamp": "2025-09-17T03:00:03.158Z",
+      "timestamp": "2025-09-18T03:00:00.549Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250917"
     },
     {
       "date": "2025-09-16",
-      "timestamp": "2025-09-16T03:00:00.743Z",
+      "timestamp": "2025-09-17T03:00:03.158Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250916"
     },
     {
       "date": "2025-09-15",
-      "timestamp": "2025-09-15T03:00:00.547Z",
+      "timestamp": "2025-09-16T03:00:00.743Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250915"
     },
     {
       "date": "2025-09-14",
-      "timestamp": "2025-09-14T03:27:50.573Z",
+      "timestamp": "2025-09-15T03:00:00.547Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250914"
     },
     {
       "date": "2025-09-13",
-      "timestamp": "2025-09-13T03:00:00.611Z",
+      "timestamp": "2025-09-14T03:27:50.573Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250913"
+    },
+    {
+      "date": "2025-09-12",
+      "timestamp": "2025-09-13T03:00:00.611Z",
+      "value": 1,
+      "comment": "Night logger violation (1 detections)",
+      "daystamp": "20250912"
     },
     {
       "date": "2025-09-08",
@@ -64,105 +78,93 @@
       "daystamp": "20250908"
     },
     {
-      "date": "2025-09-07",
+      "date": "2025-09-06",
       "timestamp": "2025-09-07T03:00:02.917Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250907"
-    },
-    {
-      "date": "2025-09-06",
-      "timestamp": "2025-09-06T03:39:42.540Z",
-      "value": 1,
-      "comment": "Night logger violation (3 detections)",
       "daystamp": "20250906"
     },
     {
-      "date": "2025-08-31",
+      "date": "2025-09-05",
+      "timestamp": "2025-09-06T03:39:42.540Z",
+      "value": 1,
+      "comment": "Night logger violation (3 detections)",
+      "daystamp": "20250905"
+    },
+    {
+      "date": "2025-08-30",
       "timestamp": "2025-08-31T03:00:03.597Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250831"
-    },
-    {
-      "date": "2025-08-27",
-      "timestamp": "2025-08-27T03:25:04.856Z",
-      "value": 1,
-      "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250827"
+      "daystamp": "20250830"
     },
     {
       "date": "2025-08-26",
-      "timestamp": "2025-08-26T03:00:00.700Z",
+      "timestamp": "2025-08-27T03:25:04.856Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250826"
     },
     {
       "date": "2025-08-25",
-      "timestamp": "2025-08-25T03:00:01.392Z",
+      "timestamp": "2025-08-26T03:00:00.700Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250825"
     },
     {
       "date": "2025-08-24",
-      "timestamp": "2025-08-24T03:35:53.650Z",
+      "timestamp": "2025-08-25T03:00:01.392Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
       "daystamp": "20250824"
     },
     {
-      "date": "2025-08-21",
+      "date": "2025-08-23",
+      "timestamp": "2025-08-24T03:35:53.650Z",
+      "value": 1,
+      "comment": "Night logger violation (1 detections)",
+      "daystamp": "20250823"
+    },
+    {
+      "date": "2025-08-20",
       "timestamp": "2025-08-21T03:00:02.149Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250821"
-    },
-    {
-      "date": "2025-08-16",
-      "timestamp": "2025-08-16T03:00:02.198Z",
-      "value": 1,
-      "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250816"
+      "daystamp": "20250820"
     },
     {
       "date": "2025-08-15",
       "timestamp": "2025-08-15T06:12:14.942Z",
       "value": 1,
-      "comment": "Night logger violation (2 detections)",
+      "comment": "Night logger violation (3 detections)",
       "daystamp": "20250815"
     }
   ],
   "posted_dates": [
-    "2025-09-06",
-    "2025-09-19",
-    "2025-09-05",
-    "2025-08-25",
-    "2025-09-16",
-    "2025-08-26",
-    "2025-08-20",
-    "2025-09-14",
-    "2025-09-15",
-    "2025-08-24",
-    "2025-09-17",
-    "2025-09-18",
+    "2025-09-21",
     "2025-09-12",
-    "2025-09-13",
     "2025-08-15",
+    "2025-08-20",
+    "2025-09-19",
+    "2025-09-06",
+    "2025-09-18",
+    "2025-09-05",
+    "2025-09-13",
+    "2025-08-24",
+    "2025-09-14",
+    "2025-08-26",
+    "2025-09-22",
+    "2025-09-07",
+    "2025-08-25",
+    "2025-09-17",
+    "2025-09-16",
     "2025-08-30",
-    "2025-09-07"
+    "2025-09-15"
   ],
-  "last_updated": "2025-09-23T06:00:16.598670Z",
-  "total_violations": 19,
+  "last_updated": "2025-09-23T20:38:58.843270Z",
+  "total_violations": 20,
   "unposted_violations": [
-    {
-      "date": "2025-09-20",
-      "timestamp": "2025-09-20T03:04:18.510Z",
-      "value": 1,
-      "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250920"
-    },
     {
       "date": "2025-09-08",
       "timestamp": "2025-09-08T04:04:27.140Z",
@@ -171,32 +173,11 @@
       "daystamp": "20250908"
     },
     {
-      "date": "2025-08-31",
-      "timestamp": "2025-08-31T03:00:03.597Z",
+      "date": "2025-08-23",
+      "timestamp": "2025-08-24T03:35:53.650Z",
       "value": 1,
       "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250831"
-    },
-    {
-      "date": "2025-08-27",
-      "timestamp": "2025-08-27T03:25:04.856Z",
-      "value": 1,
-      "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250827"
-    },
-    {
-      "date": "2025-08-21",
-      "timestamp": "2025-08-21T03:00:02.149Z",
-      "value": 1,
-      "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250821"
-    },
-    {
-      "date": "2025-08-16",
-      "timestamp": "2025-08-16T03:00:02.198Z",
-      "value": 1,
-      "comment": "Night logger violation (1 detections)",
-      "daystamp": "20250816"
+      "daystamp": "20250823"
     }
   ]
 }

@@ -354,8 +354,11 @@ def main():
                     if args.verbose:
                         print(f"Generating and uploading violations data to GitHub...")
 
-                    upload_success = github_api.upload_violations_to_branch(args.db)
-                    if not upload_success:
+                    # Upload violations data to both violations-data branch and main branch
+                    upload_success_data = github_api.upload_violations_to_branch(args.db, "violations-data")
+                    upload_success_main = github_api.upload_violations_to_branch(args.db, "main")
+
+                    if not (upload_success_data and upload_success_main):
                         print("Failed to upload violations data to GitHub", file=sys.stderr)
                         sys.exit(1)
 

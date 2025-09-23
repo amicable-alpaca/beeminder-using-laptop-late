@@ -36,26 +36,44 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests
 
-    - name: Download violations.json from violations-data branch
+    - name: Get fresh violations.json from main branch
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: |
-        echo "🔍 Checking for violations.json in violations-data branch..."
+        echo "🔍 Getting fresh violations.json from main branch..."
 
-        # Try to download violations.json from violations-data branch
+        # Download violations.json from main branch (most up-to-date)
         curl -H "Authorization: token $GITHUB_TOKEN" \
              -H "Accept: application/vnd.github.v3.raw" \
-             "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/violations.json?ref=violations-data" \
+             "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/violations.json" \
              -o violations.json \
              --fail --silent --show-error || {
-          echo "ℹ️  No violations.json found in violations-data branch"
+          echo "ℹ️  No violations.json found in main branch"
           echo '{"violations": [], "unposted_violations": []}' > violations.json
         }
 
         if [ -s violations.json ]; then
-          echo "✅ Downloaded violations.json"
-          python3 -c "import json; data = json.load(open('violations.json')); print(f'Found {len(data.get(\"unposted_violations\", []))} unposted violations')"
+          echo "✅ Downloaded violations.json from main branch"
+          python3 -c "
+import json
+from datetime import datetime, timedelta
+data = json.load(open('violations.json'))
+violations = data.get('violations', [])
+unposted = data.get('unposted_violations', [])
+print(f'Found {len(unposted)} unposted violations out of {len(violations)} total')
+
+# Check if violations.json seems fresh (updated within last 3 days)
+last_updated = data.get('last_updated', '1970-01-01T00:00:00Z')
+last_updated_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+age_hours = (datetime.now(last_updated_dt.tzinfo) - last_updated_dt).total_seconds() / 3600
+print(f'Violations data age: {age_hours:.1f} hours')
+
+if age_hours > 72:  # 3 days
+    print('⚠️  WARNING: Violations data is more than 3 days old and may be stale')
+else:
+    print('✅ Violations data appears fresh')
+"
         else
           echo "ℹ️  Empty or missing violations.json"
         fi

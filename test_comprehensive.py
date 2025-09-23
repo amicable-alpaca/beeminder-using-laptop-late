@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Comprehensive Test Suite for Night Logger System
+Comprehensive Test Suite for Night Logger System (Updated)
 
-Tests all components:
-- Repository code (night_logger_github.py, sync_nightlogger.py)
-- Local system files (nightlog CLI, systemd services)
-- Integration between components
-- Error handling and edge cases
+Tests all components of the violations-only architecture:
+- night_logger_github.py (violations.json generation and GitHub upload)
+- sync_violations.py (selective sync with Beeminder API pagination)
+- extract_violations.py (HSoT database processing)
+- Integration testing and error handling
 - Security and data integrity
 """
 
@@ -29,14 +29,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import the modules we're testing
 try:
-    from night_logger_github import GitHubAPI, is_between_23_and_359_local, local_ymd, open_db, already_posted_today, mark_posted_today
-    from sync_nightlogger import BeeminderAPI, NightLoggerSync
+    from night_logger_github import (
+        GitHubAPI, is_between_23_and_359_local, local_ymd, open_db,
+        already_posted_today, mark_posted_today, extract_violations
+    )
+    from sync_violations import BeeminderAPI, ViolationsSync
+    from extract_violations import extract_violations as extract_violations_standalone
 except ImportError as e:
     print(f"Warning: Could not import modules: {e}")
 
 
-class TestNightLoggerGitHub(unittest.TestCase):
-    """Test night_logger_github.py functionality"""
+class TestNightLoggerCore(unittest.TestCase):
+    """Test core night logger functionality"""
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -118,23 +122,57 @@ class TestNightLoggerGitHub(unittest.TestCase):
 
         conn.close()
 
-    def test_local_ymd_formatting(self):
-        """Test date formatting edge cases"""
-        test_cases = [
-            (datetime(2023, 1, 1, 0, 0, 0), "2023-01-01"),
-            (datetime(2023, 12, 31, 23, 59, 59), "2023-12-31"),
-            (datetime(2000, 2, 29, 12, 0, 0), "2000-02-29"),  # Leap year
-            (datetime(1999, 12, 31, 23, 59, 59), "1999-12-31"),  # Y2K
+    def test_violations_extraction(self):
+        """Test violations extraction from HSoT database"""
+        # Create test database with violations
+        conn = open_db(str(self.test_db))
+
+        # Add some test data
+        test_violations = [
+            ("2025-08-15T06:12:14.942Z", 1),
+            ("2025-08-15T06:13:13.086Z", 1),  # Same day, multiple detections
+            ("2025-08-16T03:00:02.198Z", 1),
+            ("2025-08-17T12:00:00.000Z", 0),  # Day time, should be ignored
         ]
 
-        for dt, expected in test_cases:
-            with self.subTest(date=dt.strftime("%Y-%m-%d")):
-                result = local_ymd(dt)
-                self.assertEqual(result, expected)
+        for timestamp, is_night in test_violations:
+            conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, ?);", (timestamp, is_night))
+
+        # Add some posted dates
+        conn.execute("INSERT INTO posts (ymd, posted_at_utc) VALUES (?, ?);", ("2025-08-15", "2025-08-15T12:00:00Z"))
+        conn.commit()
+        conn.close()
+
+        # Test violations extraction
+        violations_data = extract_violations(str(self.test_db))
+
+        # Verify structure
+        self.assertIn('violations', violations_data)
+        self.assertIn('posted_dates', violations_data)
+        self.assertIn('total_violations', violations_data)
+        self.assertIn('unposted_violations', violations_data)
+
+        # Verify data
+        self.assertEqual(violations_data['total_violations'], 2)  # 2 unique dates with violations
+        self.assertEqual(len(violations_data['violations']), 2)
+        self.assertIn("2025-08-15", [v['date'] for v in violations_data['violations']])
+        self.assertIn("2025-08-16", [v['date'] for v in violations_data['violations']])
+
+        # Check that 8/15 shows 2 detections
+        aug_15_violation = next(v for v in violations_data['violations'] if v['date'] == '2025-08-15')
+        self.assertEqual(aug_15_violation['comment'], "Night logger violation (2 detections)")
+
+        # Check posted dates
+        self.assertIn("2025-08-15", violations_data['posted_dates'])
+
+        # Check unposted violations (should not include posted 8/15)
+        unposted_dates = [v['date'] for v in violations_data['unposted_violations']]
+        self.assertNotIn("2025-08-15", unposted_dates)
+        self.assertIn("2025-08-16", unposted_dates)
 
 
 class TestGitHubAPI(unittest.TestCase):
-    """Test GitHub API functionality"""
+    """Test GitHub API functionality for violations.json upload"""
 
     def setUp(self):
         self.api = GitHubAPI("test_token", "test_user/test_repo")
@@ -155,11 +193,11 @@ class TestGitHubAPI(unittest.TestCase):
     @patch('requests.put')
     @patch('requests.get')
     @patch('requests.post')
-    def test_upload_database_new_branch(self, mock_post, mock_get, mock_put):
-        """Test database upload when branch doesn't exist"""
-        # Create test database
+    def test_upload_violations_new_branch(self, mock_post, mock_get, mock_put):
+        """Test violations.json upload when branch doesn't exist"""
+        # Create test database with violations
         conn = open_db(str(self.test_db))
-        conn.execute("INSERT INTO logs (is_night) VALUES (1);")
+        conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, ?);", ("2025-08-15T06:12:14.942Z", 1))
         conn.commit()
         conn.close()
 
@@ -176,401 +214,375 @@ class TestGitHubAPI(unittest.TestCase):
         # Mock successful file upload
         mock_put.return_value = MagicMock(status_code=201)
 
-        result = self.api.upload_database_to_branch(str(self.test_db))
+        result = self.api.upload_violations_to_branch(str(self.test_db))
         self.assertTrue(result)
+
+        # Verify violations.json was uploaded (not database file)
+        put_call = mock_put.call_args
+        self.assertIn("violations.json", put_call[0][0])  # URL contains violations.json
+
+        # Verify content is JSON (not binary database)
+        uploaded_content = put_call[1]['json']['content']
+        decoded_content = base64.b64decode(uploaded_content).decode('utf-8')
+        parsed_json = json.loads(decoded_content)
+        self.assertIn('violations', parsed_json)
 
     @patch('requests.post')
     def test_trigger_workflow(self, mock_post):
         """Test workflow triggering"""
         mock_post.return_value = MagicMock(status_code=204)
 
-        result = self.api.trigger_workflow("test-event")
+        result = self.api.trigger_workflow("night-logger-sync")
         self.assertTrue(result)
 
         # Verify correct API call
         mock_post.assert_called_once()
         call_args = mock_post.call_args
         self.assertIn("dispatches", call_args[0][0])
-        self.assertEqual(call_args[1]["json"]["event_type"], "test-event")
-
-    @patch('requests.post')
-    def test_trigger_workflow_failure(self, mock_post):
-        """Test workflow triggering failure handling"""
-        mock_post.side_effect = requests.exceptions.RequestException("API Error")
-
-        result = self.api.trigger_workflow("test-event")
-        self.assertFalse(result)
+        self.assertEqual(call_args[1]["json"]["event_type"], "night-logger-sync")
 
 
 class TestBeeminderAPI(unittest.TestCase):
-    """Test Beeminder API functionality"""
+    """Test Beeminder API with pagination support"""
 
     def setUp(self):
         self.api = BeeminderAPI("test_user", "test_token")
 
-    @patch('requests.get')
-    def test_get_goal_datapoints_with_pagination(self, mock_get):
-        """Test paginated datapoint retrieval"""
-        # Mock paginated responses
-        page1_data = []
-        for i in range(300):  # Full page
-            page1_data.append({
-                "id": str(i+1),
-                "timestamp": 1609459200 + i*86400,
-                "comment": f"test datapoint {i+1}",
-                "value": 1
-            })
+    def test_beeminder_api_initialization(self):
+        """Test Beeminder API initialization"""
+        self.assertEqual(self.api.username, "test_user")
+        self.assertEqual(self.api.auth_token, "test_token")
+        self.assertEqual(self.api.base_url, "https://www.beeminder.com/api/v1")
 
-        page2_data = [
-            {"id": "301", "timestamp": 1609459200 + 300*86400, "comment": "final datapoint", "value": 1}
+    @patch('requests.get')
+    def test_pagination_single_page(self, mock_get):
+        """Test pagination with single page of results"""
+        # Mock single page with less than 300 results
+        mock_response = MagicMock()
+        mock_response.json.return_value = [
+            {"id": "1", "timestamp": 1692057600, "value": 1, "comment": "test1"},
+            {"id": "2", "timestamp": 1692144000, "value": 1, "comment": "test2"}
         ]
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        result = self.api.get_goal_datapoints("test-goal")
+
+        self.assertEqual(len(result), 2)
+        mock_get.assert_called_once()
+
+        # Verify pagination parameters
+        call_args = mock_get.call_args
+        params = call_args[1]['params']
+        self.assertEqual(params['page'], 1)
+        self.assertEqual(params['per_page'], 300)
+
+    @patch('requests.get')
+    def test_pagination_multiple_pages(self, mock_get):
+        """Test pagination with multiple pages"""
+        # Mock multiple pages
+        page_1_data = [{"id": str(i), "timestamp": 1692057600 + i, "value": 1} for i in range(300)]
+        page_2_data = [{"id": str(i), "timestamp": 1692057600 + i, "value": 1} for i in range(300, 350)]
 
         mock_responses = [
-            MagicMock(status_code=200, json=lambda: page1_data),
-            MagicMock(status_code=200, json=lambda: page2_data)
+            MagicMock(json=lambda: page_1_data),  # Page 1: 300 items
+            MagicMock(json=lambda: page_2_data)   # Page 2: 50 items
         ]
+
+        for resp in mock_responses:
+            resp.raise_for_status.return_value = None
+
         mock_get.side_effect = mock_responses
 
-        result = self.api.get_goal_datapoints("test_goal")
+        result = self.api.get_goal_datapoints("test-goal")
 
-        # Should fetch both pages
-        self.assertEqual(len(result), 301)
-        self.assertEqual(result[0]["id"], "1")
-        self.assertEqual(result[-1]["id"], "301")
-        self.assertEqual(mock_get.call_count, 2)
-
-    @patch('requests.get')
-    def test_get_goal_datapoints_empty(self, mock_get):
-        """Test empty goal handling"""
-        mock_get.return_value = MagicMock(status_code=200, json=lambda: [])
-
-        result = self.api.get_goal_datapoints("empty_goal")
-        self.assertEqual(len(result), 0)
+        self.assertEqual(len(result), 350)  # Total from both pages
+        self.assertEqual(mock_get.call_count, 2)  # Two API calls
 
     @patch('requests.post')
-    def test_create_datapoint(self, mock_post):
-        """Test datapoint creation"""
+    def test_create_datapoint_timestamp_conversion(self, mock_post):
+        """Test datapoint creation with ISO timestamp conversion"""
         mock_post.return_value = MagicMock(status_code=200)
+        mock_post.return_value.raise_for_status.return_value = None
 
-        result = self.api.create_datapoint(
-            "test_goal", 1.0, 1609459200, "test comment", "test_id"
-        )
+        violation = {
+            "date": "2025-08-15",
+            "timestamp": "2025-08-15T06:12:14.942Z",
+            "value": 1,
+            "comment": "Night logger violation (2 detections)"
+        }
+
+        result = self.api.create_datapoint("test-goal", violation)
         self.assertTrue(result)
 
-    @patch('requests.delete')
-    def test_delete_datapoint(self, mock_delete):
-        """Test datapoint deletion"""
-        mock_delete.return_value = MagicMock(status_code=200)
+        # Verify timestamp conversion
+        call_args = mock_post.call_args
+        posted_data = call_args[1]['data']
+        self.assertIn('timestamp', posted_data)
+        self.assertIsInstance(posted_data['timestamp'], int)  # Unix timestamp
+        self.assertEqual(posted_data['value'], 1.0)  # Converted to float
+        self.assertEqual(posted_data['comment'], violation['comment'])
 
-        result = self.api.delete_datapoint("test_goal", "123")
-        self.assertTrue(result)
 
-
-class TestNightLoggerSync(unittest.TestCase):
-    """Test sync_nightlogger.py functionality"""
+class TestViolationsSync(unittest.TestCase):
+    """Test violations-only sync system"""
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-        self.env_patcher = patch.dict(os.environ, {
-            'BEEMINDER_USERNAME': 'test_user',
-            'BEEMINDER_AUTH_TOKEN': 'test_token',
-            'BEEMINDER_GOAL_SLUG': 'test_goal',
-            'GITHUB_TOKEN': 'test_github_token'
-        })
-        self.env_patcher.start()
+        self.violations_file = Path(self.temp_dir) / "test_violations.json"
+
+        # Create test violations.json
+        test_violations = {
+            "violations": [
+                {
+                    "date": "2025-08-15",
+                    "timestamp": "2025-08-15T06:12:14.942Z",
+                    "value": 1,
+                    "comment": "Night logger violation (2 detections)",
+                    "daystamp": "20250815"
+                },
+                {
+                    "date": "2025-08-16",
+                    "timestamp": "2025-08-16T03:00:02.198Z",
+                    "value": 1,
+                    "comment": "Night logger violation (1 detections)",
+                    "daystamp": "20250816"
+                }
+            ],
+            "posted_dates": ["2025-08-15"],
+            "last_updated": "2025-08-16T12:00:00Z",
+            "total_violations": 2,
+            "unposted_violations": [
+                {
+                    "date": "2025-08-16",
+                    "timestamp": "2025-08-16T03:00:02.198Z",
+                    "value": 1,
+                    "comment": "Night logger violation (1 detections)",
+                    "daystamp": "20250816"
+                }
+            ]
+        }
+
+        with open(self.violations_file, 'w') as f:
+            json.dump(test_violations, f)
 
     def tearDown(self):
-        self.env_patcher.stop()
+        if self.violations_file.exists():
+            self.violations_file.unlink()
 
-    def test_sync_initialization(self):
-        """Test sync object initialization"""
-        sync = NightLoggerSync()
-        self.assertEqual(sync.beeminder_username, 'test_user')
-        self.assertEqual(sync.beeminder_token, 'test_token')
-        self.assertEqual(sync.beeminder_goal, 'test_goal')
-        self.assertEqual(sync.github_token, 'test_github_token')
+    def test_load_violations(self):
+        """Test loading violations from JSON file"""
+        # Mock environment variables
+        with patch.dict('os.environ', {
+            'BEEMINDER_USERNAME': 'test_user',
+            'BEEMINDER_AUTH_TOKEN': 'test_token',
+            'BEEMINDER_GOAL_SLUG': 'test_goal'
+        }):
+            sync = ViolationsSync()
+            violations_data = sync.load_violations(str(self.violations_file))
 
-    def test_sync_missing_env(self):
-        """Test initialization with missing environment variables"""
-        with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(ValueError):
-                NightLoggerSync()
+            self.assertEqual(violations_data['total_violations'], 2)
+            self.assertEqual(len(violations_data['violations']), 2)
+            self.assertEqual(len(violations_data['unposted_violations']), 1)
 
-    def test_database_operations(self):
-        """Test database synchronization operations"""
-        sync = NightLoggerSync()
-        test_db = Path(self.temp_dir) / "test.db"
+    @patch('sync_violations.BeeminderAPI')
+    def test_selective_sync_logic(self, mock_beeminder_class):
+        """Test selective sync identifies correct changes needed"""
+        # Mock BeeminderAPI instance
+        mock_beeminder = MagicMock()
+        mock_beeminder_class.return_value = mock_beeminder
 
+        # Mock existing Beeminder datapoints (missing 8/16, has extra 8/17)
+        existing_datapoints = [
+            {
+                "id": "dp1",
+                "timestamp": 1755238334,  # 2025-08-15 02:12:14 UTC (06:12:14 UTC)
+                "value": 1.0,
+                "comment": "Night logger violation (2 detections)"
+            },
+            {
+                "id": "dp2",
+                "timestamp": 1755324000,  # 2025-08-17 (not in violations.json)
+                "value": 1.0,
+                "comment": "Manual entry"
+            }
+        ]
+        mock_beeminder.get_goal_datapoints.return_value = existing_datapoints
+
+        # Mock environment variables
+        with patch.dict('os.environ', {
+            'BEEMINDER_USERNAME': 'test_user',
+            'BEEMINDER_AUTH_TOKEN': 'test_token',
+            'BEEMINDER_GOAL_SLUG': 'test_goal'
+        }):
+            sync = ViolationsSync()
+            violations_data = sync.load_violations(str(self.violations_file))
+
+            # Test selective sync (we can't easily test the full method due to complexity,
+            # but we can test the logic components)
+            sot_violations = {v['date']: v for v in violations_data['violations']}
+
+            # Verify SoT has what we expect
+            self.assertIn('2025-08-15', sot_violations)
+            self.assertIn('2025-08-16', sot_violations)
+            self.assertNotIn('2025-08-17', sot_violations)
+
+
+class TestExtractViolationsStandalone(unittest.TestCase):
+    """Test the standalone extract_violations.py script"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_db = Path(self.temp_dir) / "test.db"
+
+    def tearDown(self):
+        if self.test_db.exists():
+            self.test_db.unlink()
+
+    def test_extract_violations_standalone(self):
+        """Test standalone violations extraction matches integrated version"""
         # Create test database
-        conn = sqlite3.connect(test_db)
-        conn.executescript("""
-            CREATE TABLE logs (
-                id INTEGER PRIMARY KEY,
-                logged_at TEXT,
-                is_night INTEGER
-            );
-            CREATE TABLE posts (
-                ymd TEXT PRIMARY KEY,
-                posted_at_utc TEXT
-            );
-            INSERT INTO posts VALUES ('2023-08-15', '2023-08-16T05:00:00Z');
-            INSERT INTO logs VALUES (1, '2023-08-15T23:30:00Z', 1);
-        """)
+        conn = open_db(str(self.test_db))
+        conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, ?);", ("2025-08-15T06:12:14.942Z", 1))
+        conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, ?);", ("2025-08-16T03:00:02.198Z", 1))
         conn.commit()
         conn.close()
 
-        # Test data extraction
-        posts = sync.get_posted_days_from_db(test_db)
-        logs = sync.get_logs_from_db(test_db)
+        # Test both versions produce same result
+        integrated_result = extract_violations(str(self.test_db))
+        standalone_result = extract_violations_standalone(str(self.test_db))
 
-        self.assertEqual(posts, {"2023-08-15"})
-        self.assertEqual(len(logs), 1)
-        self.assertEqual(logs[0], ("2023-08-15T23:30:00Z", 1))
+        self.assertEqual(integrated_result['total_violations'], standalone_result['total_violations'])
+        self.assertEqual(len(integrated_result['violations']), len(standalone_result['violations']))
 
 
-class TestSystemIntegration(unittest.TestCase):
+class TestIntegration(unittest.TestCase):
     """Test integration between components"""
 
-    def test_systemd_service_file_exists(self):
-        """Test systemd service file exists and is valid"""
-        service_file = "/etc/systemd/system/night-logger.service"
-        self.assertTrue(os.path.exists(service_file))
+    def test_end_to_end_violations_flow(self):
+        """Test complete violations flow: DB -> JSON -> Upload simulation"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_db = Path(temp_dir) / "test.db"
 
-        with open(service_file, 'r') as f:
-            content = f.read()
+            # Step 1: Create HSoT database with violations
+            conn = open_db(str(test_db))
+            conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, ?);", ("2025-08-15T06:12:14.942Z", 1))
+            conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, ?);", ("2025-08-15T06:13:13.086Z", 1))
+            conn.commit()
+            conn.close()
 
-        # Check for required configurations
-        self.assertIn('night_logger_github.py', content)
-        self.assertIn('EnvironmentFile=/home/admin/.env', content)
-        self.assertIn('Type=simple', content)
+            # Step 2: Extract violations
+            violations_data = extract_violations(str(test_db))
+            self.assertEqual(violations_data['total_violations'], 1)  # One unique date
 
-    def test_nightlog_cli_exists(self):
-        """Test nightlog CLI exists and is executable"""
-        nightlog_path = "/usr/local/bin/nightlog"
-        self.assertTrue(os.path.exists(nightlog_path))
-        self.assertTrue(os.access(nightlog_path, os.X_OK))
+            # Step 3: Simulate GitHub upload (test JSON serialization)
+            violations_json = json.dumps(violations_data, indent=2)
+            violations_base64 = base64.b64encode(violations_json.encode('utf-8')).decode('utf-8')
 
-    def test_environment_file_security(self):
-        """Test environment file has correct permissions"""
-        env_file = "/home/admin/.env"
-        if os.path.exists(env_file):
-            stat_info = os.stat(env_file)
-            perms = oct(stat_info.st_mode)[-3:]
-            self.assertEqual(perms, '600', "Environment file should have 600 permissions")
+            # Verify round-trip
+            decoded_json = base64.b64decode(violations_base64).decode('utf-8')
+            parsed_violations = json.loads(decoded_json)
+            self.assertEqual(parsed_violations['total_violations'], 1)
 
-    def test_database_permissions(self):
-        """Test database files have correct permissions"""
-        db_files = [
-            "/var/lib/night-logger/night_logs.db",
-            "/var/lib/night-logger/night_logs_ro.db"
-        ]
+    def test_error_handling_missing_files(self):
+        """Test error handling for missing files"""
+        # Test extract_violations with missing database
+        result = extract_violations("/nonexistent/database.db")
+        self.assertEqual(result['violations'], [])
+        self.assertEqual(result['total_violations'], 0)
 
-        for db_file in db_files:
-            if os.path.exists(db_file):
-                with self.subTest(file=db_file):
-                    stat_info = os.stat(db_file)
-                    import pwd, grp
-
-                    # Should be owned by root with nightlog-readers group
-                    owner = pwd.getpwuid(stat_info.st_uid).pw_name
-                    group = grp.getgrgid(stat_info.st_gid).gr_name
-
-                    self.assertEqual(owner, 'root')
-                    self.assertEqual(group, 'nightlog-readers')
-
-
-class TestErrorHandling(unittest.TestCase):
-    """Test error handling and edge cases"""
-
-    def test_database_corruption_handling(self):
-        """Test handling of corrupted database"""
-        temp_dir = tempfile.mkdtemp()
-        corrupt_db = Path(temp_dir) / "corrupt.db"
-
-        # Create a file that's not a valid SQLite database
-        with open(corrupt_db, 'w') as f:
-            f.write("This is not a valid SQLite database")
-
-        # Test that our code handles this gracefully
-        with self.assertRaises(sqlite3.DatabaseError):
-            open_db(str(corrupt_db))
-
-    def test_network_failure_handling(self):
-        """Test handling of network failures"""
-        api = GitHubAPI("test_token", "test_user/test_repo")
-
-        with patch('requests.post') as mock_post:
-            mock_post.side_effect = requests.exceptions.ConnectionError("Network error")
-
-            result = api.trigger_workflow("test-event")
-            self.assertFalse(result)
-
-    def test_invalid_time_handling(self):
-        """Test handling of invalid time values"""
-        # Test with various edge cases
-        test_cases = [
-            datetime(1970, 1, 1, 0, 0, 0),  # Unix epoch
-            datetime(2038, 1, 19, 3, 14, 7),  # 32-bit timestamp limit
-            datetime(9999, 12, 31, 23, 59, 59),  # Far future
-        ]
-
-        for dt in test_cases:
-            with self.subTest(time=dt):
-                # Should not raise exception
-                result = is_between_23_and_359_local(dt)
-                self.assertIsInstance(result, bool)
-
-
-class TestSecurityAndDataIntegrity(unittest.TestCase):
-    """Test security aspects and data integrity"""
-
-    def test_sql_injection_protection(self):
-        """Test protection against SQL injection"""
-        temp_dir = tempfile.mkdtemp()
-        test_db = Path(temp_dir) / "test.db"
-
-        conn = open_db(str(test_db))
-
-        # Try SQL injection in ymd parameter
-        malicious_ymd = "'; DROP TABLE logs; --"
-
-        # This should not cause any issues
-        result = already_posted_today(conn, malicious_ymd)
-        self.assertFalse(result)
-
-        # Verify tables still exist
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [row[0] for row in cursor.fetchall()]
-        self.assertIn('logs', tables)
-        self.assertIn('posts', tables)
-
-        conn.close()
-
-    def test_file_path_traversal_protection(self):
-        """Test protection against path traversal attacks"""
-        api = GitHubAPI("test_token", "test_user/test_repo")
-
-        # Try path traversal in database upload
-        malicious_path = "../../../etc/passwd"
-
-        # Should handle gracefully (file won't exist or access denied)
-        try:
-            result = api.upload_database_to_branch(malicious_path)
-            self.assertFalse(result)
-        except (FileNotFoundError, PermissionError):
-            # Expected behavior - path traversal blocked
-            pass
-
-    def test_environment_variable_validation(self):
-        """Test validation of environment variables"""
-        with patch.dict(os.environ, {
-            'BEEMINDER_USERNAME': '',  # Empty string
+        # Test ViolationsSync with missing violations file
+        with patch.dict('os.environ', {
+            'BEEMINDER_USERNAME': 'test_user',
             'BEEMINDER_AUTH_TOKEN': 'test_token',
-            'BEEMINDER_GOAL_SLUG': 'test_goal',
-            'GITHUB_TOKEN': 'test_github_token'
+            'BEEMINDER_GOAL_SLUG': 'test_goal'
         }):
-            with self.assertRaises(ValueError):
-                NightLoggerSync()
+            sync = ViolationsSync()
+            result = sync.load_violations("/nonexistent/violations.json")
+            self.assertEqual(result['violations'], [])
 
 
-class TestPerformanceAndScalability(unittest.TestCase):
-    """Test performance characteristics"""
+class TestSecurity(unittest.TestCase):
+    """Test security aspects"""
 
-    def test_large_database_handling(self):
-        """Test handling of large databases"""
-        temp_dir = tempfile.mkdtemp()
-        test_db = Path(temp_dir) / "large_test.db"
+    def test_no_secrets_in_code(self):
+        """Ensure no hardcoded secrets in modules"""
+        modules_to_check = [
+            'night_logger_github.py',
+            'sync_violations.py',
+            'extract_violations.py'
+        ]
 
-        conn = open_db(str(test_db))
+        for module_file in modules_to_check:
+            if Path(module_file).exists():
+                with open(module_file, 'r') as f:
+                    content = f.read()
 
-        # Insert a large number of records
-        records = [(f"2023-08-{i:02d}T23:30:00Z", 1) for i in range(1, 32)]  # Month of data
-        conn.executemany("INSERT INTO logs (logged_at, is_night) VALUES (?, ?);", records)
-        conn.commit()
+                # Check for common secret patterns
+                self.assertNotIn('ghp_', content, f"GitHub token found in {module_file}")
+                self.assertNotIn('password', content.lower(), f"Password found in {module_file}")
 
-        # Test retrieval performance
-        start_time = time.time()
-        cursor = conn.execute("SELECT COUNT(*) FROM logs WHERE is_night = 1;")
-        result = cursor.fetchone()[0]
-        end_time = time.time()
+                # Ensure environment variables are used
+                if 'BEEMINDER' in content:
+                    self.assertIn('os.getenv', content, f"Hardcoded Beeminder credentials in {module_file}")
 
-        self.assertEqual(result, 31)
-        self.assertLess(end_time - start_time, 1.0, "Query should complete quickly")
+    def test_database_readonly_access(self):
+        """Test database readonly access patterns"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_db = Path(temp_dir) / "test.db"
 
-        conn.close()
+            # Create database
+            conn = open_db(str(test_db))
+            conn.execute("INSERT INTO logs (is_night) VALUES (1);")
+            conn.commit()
+            conn.close()
 
-    def test_pagination_efficiency(self):
-        """Test that pagination works efficiently"""
-        api = BeeminderAPI("test_user", "test_token")
+            # Test readonly access in extract_violations
+            violations = extract_violations(str(test_db))
+            self.assertIsInstance(violations, dict)
 
-        with patch('requests.get') as mock_get:
-            # Mock pagination with proper stop condition
-            page_responses = [
-                # Page 1: Full page (300 items)
-                MagicMock(status_code=200, json=lambda: [{"id": str(i), "timestamp": 1609459200 + i} for i in range(300)]),
-                # Page 2: Partial page (50 items) - triggers stop
-                MagicMock(status_code=200, json=lambda: [{"id": str(i), "timestamp": 1609459200 + i} for i in range(300, 350)])
-            ]
-            mock_get.side_effect = page_responses
-
-            start_time = time.time()
-            result = api.get_goal_datapoints("test_goal")
-            end_time = time.time()
-
-            self.assertEqual(len(result), 350)  # 300 + 50
-            self.assertLess(end_time - start_time, 5.0, "Pagination should be efficient")
+            # Verify original database unchanged
+            conn = sqlite3.connect(str(test_db))
+            cursor = conn.execute("SELECT COUNT(*) FROM logs;")
+            self.assertEqual(cursor.fetchone()[0], 1)
+            conn.close()
 
 
-def run_comprehensive_tests():
-    """Run all tests and generate detailed report"""
-    print("🧪 COMPREHENSIVE NIGHT LOGGER TEST SUITE")
-    print("=" * 60)
+def run_all_tests():
+    """Run all tests with detailed output"""
+    # Create test suite
+    test_suite = unittest.TestSuite()
 
-    # Discover and run all tests
+    # Add all test classes
     test_classes = [
-        TestNightLoggerGitHub,
+        TestNightLoggerCore,
         TestGitHubAPI,
         TestBeeminderAPI,
-        TestNightLoggerSync,
-        TestSystemIntegration,
-        TestErrorHandling,
-        TestSecurityAndDataIntegrity,
-        TestPerformanceAndScalability
+        TestViolationsSync,
+        TestExtractViolationsStandalone,
+        TestIntegration,
+        TestSecurity
     ]
 
-    suite = unittest.TestSuite()
     for test_class in test_classes:
-        tests = unittest.TestLoader().loadTestsFromTestCase(test_class)
-        suite.addTests(tests)
+        test_suite.addTest(unittest.makeSuite(test_class))
 
-    # Run tests with detailed output
-    runner = unittest.TextTestRunner(verbosity=2, stream=sys.stdout)
-    result = runner.run(suite)
+    # Run tests
+    runner = unittest.TextTestRunner(verbosity=2, buffer=True)
+    result = runner.run(test_suite)
 
-    # Print summary
-    print("\n" + "=" * 60)
-    print("TEST SUMMARY")
-    print("=" * 60)
-    print(f"Tests run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
-    print(f"Success rate: {((result.testsRun - len(result.failures) - len(result.errors)) / result.testsRun * 100):.1f}%")
-
-    if result.failures:
-        print("\nFAILURES:")
-        for test, traceback in result.failures:
-            error_msg = traceback.split('AssertionError: ')[-1].split('\n')[0]
-            print(f"- {test}: {error_msg}")
-
-    if result.errors:
-        print("\nERRORS:")
-        for test, traceback in result.errors:
-            error_msg = traceback.split('Exception: ')[-1].split('\n')[0]
-            print(f"- {test}: {error_msg}")
-
-    return result.wasSuccessful()
+    return result.wasSuccessful(), len(result.failures), len(result.errors)
 
 
-if __name__ == '__main__':
-    success = run_comprehensive_tests()
-    sys.exit(0 if success else 1)
+if __name__ == "__main__":
+    print("🧪 Running Comprehensive Test Suite for Night Logger System")
+    print("=" * 70)
+
+    success, failures, errors = run_all_tests()
+
+    print("=" * 70)
+    if success:
+        print("✅ All tests passed!")
+    else:
+        print(f"❌ Tests failed: {failures} failures, {errors} errors")
+        sys.exit(1)

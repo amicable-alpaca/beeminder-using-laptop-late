@@ -91,6 +91,17 @@ def mark_posted_today(conn: sqlite3.Connection, ymd: str) -> None:
 
 def extract_violations(db_path: str) -> Dict:
     """Extract all violations from the database"""
+    from pathlib import Path
+
+    if not Path(db_path).exists():
+        return {
+            "violations": [],
+            "posted_dates": [],
+            "last_updated": datetime.utcnow().isoformat() + "Z",
+            "total_violations": 0,
+            "unposted_violations": []
+        }
+
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     cursor = conn.cursor()
 

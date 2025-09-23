@@ -27,12 +27,13 @@ System deps
 
 import argparse
 import base64
+import json
 import os
 import sqlite3
 import sys
 import time
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict, List
 import requests  # apt: python3-requests
 
 DB_PATH = "night_logs.db"
@@ -88,6 +89,54 @@ def mark_posted_today(conn: sqlite3.Connection, ymd: str) -> None:
     conn.commit()
 
 
+def extract_violations(db_path: str) -> Dict:
+    """Extract all violations from the database"""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    cursor = conn.cursor()
+
+    # Get all violations with their timestamps
+    cursor.execute("""
+        SELECT
+            DATE(logged_at) as date,
+            logged_at,
+            COUNT(*) as violation_count
+        FROM logs
+        WHERE is_night = 1
+        GROUP BY DATE(logged_at)
+        ORDER BY date DESC
+    """)
+
+    violations = []
+    for date, first_violation_timestamp, count in cursor.fetchall():
+        violations.append({
+            "date": date,
+            "timestamp": first_violation_timestamp,
+            "value": 1,  # Beeminder value for violation
+            "comment": f"Night logger violation ({count} detections)",
+            "daystamp": date.replace("-", "")  # Beeminder format: YYYYMMDD
+        })
+
+    # Check which dates have already been posted to avoid duplicates
+    try:
+        cursor.execute("SELECT ymd FROM posts ORDER BY ymd")
+        posted_dates = {row[0] for row in cursor.fetchall()}
+    except sqlite3.OperationalError:
+        # If posts table doesn't exist or is inaccessible, assume no posted dates
+        posted_dates = set()
+
+    conn.close()
+
+    result = {
+        "violations": violations,
+        "posted_dates": list(posted_dates),
+        "last_updated": datetime.utcnow().isoformat() + "Z",
+        "total_violations": len(violations),
+        "unposted_violations": [v for v in violations if v["date"] not in posted_dates]
+    }
+
+    return result
+
+
 # ----------------- GitHub API -----------------
 
 class GitHubAPI:
@@ -103,15 +152,15 @@ class GitHubAPI:
             "User-Agent": "night-logger-github/1.0"
         }
 
-    def upload_database_to_branch(self, db_path: str, branch: str = "hsot-database") -> bool:
-        """Upload database file to a specific branch"""
+    def upload_violations_to_branch(self, db_path: str, branch: str = "violations-data") -> bool:
+        """Generate violations.json from database and upload to a specific branch"""
         try:
-            # Read database file
-            with open(db_path, 'rb') as f:
-                db_content = f.read()
+            # Extract violations from the HSoT database
+            violations_data = extract_violations(db_path)
 
-            # Encode as base64
-            db_base64 = base64.b64encode(db_content).decode('utf-8')
+            # Convert to JSON
+            violations_json = json.dumps(violations_data, indent=2)
+            violations_base64 = base64.b64encode(violations_json.encode('utf-8')).decode('utf-8')
 
             # Check if branch exists
             branch_url = f"{self.base_url}/repos/{self.repo}/git/refs/heads/{branch}"
@@ -138,13 +187,13 @@ class GitHubAPI:
                 print(f"✅ Created branch '{branch}'")
 
             # Get current file SHA if it exists
-            file_url = f"{self.base_url}/repos/{self.repo}/contents/hsot_database.db"
+            file_url = f"{self.base_url}/repos/{self.repo}/contents/violations.json"
             file_params = {"ref": branch}
             file_response = requests.get(file_url, headers=self.headers, params=file_params)
 
             file_data = {
-                "message": f"Update HSoT database - {datetime.utcnow().isoformat()}Z",
-                "content": db_base64,
+                "message": f"Update violations data - {datetime.utcnow().isoformat()}Z",
+                "content": violations_base64,
                 "branch": branch
             }
 
@@ -156,11 +205,13 @@ class GitHubAPI:
             upload_response = requests.put(file_url, headers=self.headers, json=file_data)
             upload_response.raise_for_status()
 
-            print(f"✅ Database uploaded to branch '{branch}'")
+            unposted_count = len(violations_data.get('unposted_violations', []))
+            total_count = len(violations_data.get('violations', []))
+            print(f"✅ Violations data uploaded to branch '{branch}' ({unposted_count} unposted, {total_count} total)")
             return True
 
         except requests.exceptions.RequestException as e:
-            print(f"❌ Failed to upload database: {e}")
+            print(f"❌ Failed to upload violations data: {e}")
             return False
 
     def trigger_workflow(self, event_type: str = "night-logger-sync") -> bool:
@@ -238,17 +289,17 @@ def main():
                     )
                     sys.exit(2)
 
-                # Upload database and trigger GitHub Actions
+                # Generate violations.json and upload to GitHub
                 github_api = GitHubAPI(args.github_token, args.github_repo)
 
                 try:
-                    # Upload current database to GitHub
+                    # Upload violations data to GitHub
                     if args.verbose:
-                        print(f"Uploading database to GitHub...")
+                        print(f"Generating and uploading violations data to GitHub...")
 
-                    upload_success = github_api.upload_database_to_branch(args.db)
+                    upload_success = github_api.upload_violations_to_branch(args.db)
                     if not upload_success:
-                        print("Failed to upload database to GitHub", file=sys.stderr)
+                        print("Failed to upload violations data to GitHub", file=sys.stderr)
                         sys.exit(1)
 
                     # Trigger GitHub Actions workflow

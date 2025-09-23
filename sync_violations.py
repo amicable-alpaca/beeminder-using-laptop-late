@@ -22,13 +22,43 @@ class BeeminderAPI:
         self.base_url = "https://www.beeminder.com/api/v1"
 
     def get_goal_datapoints(self, goal_slug: str) -> List[Dict]:
-        """Get all datapoints for a goal"""
-        url = f"{self.base_url}/users/{self.username}/goals/{goal_slug}/datapoints.json"
-        params = {'auth_token': self.auth_token, 'sort': 'timestamp'}
+        """Get all datapoints for a specific goal with pagination support"""
+        all_datapoints = []
+        page = 1
+        per_page = 300  # Maximum allowed by Beeminder API
 
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        return response.json()
+        while True:
+            url = f"{self.base_url}/users/{self.username}/goals/{goal_slug}/datapoints.json"
+            params = {
+                'auth_token': self.auth_token,
+                'page': page,
+                'per_page': per_page,
+                'sort': 'timestamp'  # Consistent ordering
+            }
+
+            try:
+                response = requests.get(url, params=params, timeout=30)
+                response.raise_for_status()
+                page_data = response.json()
+
+                if not page_data:  # No more data
+                    break
+
+                all_datapoints.extend(page_data)
+
+                # If we got less than per_page, we're done
+                if len(page_data) < per_page:
+                    break
+
+                page += 1
+                print(f"📄 Fetched page {page-1} for {goal_slug}: {len(page_data)} datapoints")
+
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Error fetching goal data for {goal_slug} (page {page}): {e}")
+                break
+
+        print(f"📊 Total datapoints fetched for {goal_slug}: {len(all_datapoints)}")
+        return all_datapoints
 
     def create_datapoint(self, goal_slug: str, violation: Dict) -> bool:
         """Create a datapoint for a violation"""
@@ -93,150 +123,175 @@ class ViolationsSync:
         with open(violations_path, 'r') as f:
             return json.load(f)
 
-    def cleanup_unauthorized_datapoints(self, violations_data: Dict) -> None:
-        """Remove ALL Beeminder datapoints that don't exist in SoT violations data (tamper-resistant)"""
-        print("🧹 Enforcing tamper resistance - removing unauthorized datapoints...")
+    def selective_sync_datapoints(self, violations_data: Dict) -> None:
+        """Selective sync: Only add/remove/update datapoints as needed (prevents derailment)"""
+        print("🔄 Selective sync - comparing SoT with Beeminder datapoints...")
 
-        # Get all violations from SoT (authorized dates)
-        all_violations = violations_data.get('violations', [])
-        authorized_dates = {v['date'] for v in all_violations}
-
-        # Get existing Beeminder datapoints
+        # Get current Beeminder datapoints
         beeminder_datapoints = self.beeminder.get_goal_datapoints(self.beeminder_goal)
 
-        # Find night_logger datapoints that shouldn't exist
-        unauthorized_datapoints = []
-        authorized_datapoints = []
+        # Convert violations to date-based mapping for comparison
+        sot_violations = {v['date']: v for v in violations_data.get('violations', [])}
+
+        # Convert Beeminder datapoints to date-based mapping
+        from datetime import datetime
+        beeminder_by_date = {}
+        duplicates_to_delete = []
 
         for dp in beeminder_datapoints:
-            # Check ALL datapoints for tamper resistance (not just night_logger ones)
-            timestamp = dp.get('timestamp')
-            if timestamp:
-                try:
-                    dt = datetime.fromtimestamp(int(float(timestamp)))
-                    date_str = dt.strftime('%Y-%m-%d')
-
-                    if date_str not in authorized_dates:
-                        # Any datapoint on unauthorized date gets deleted
-                        unauthorized_datapoints.append(dp)
-                    else:
-                        # Even on authorized dates, only keep night_logger entries
-                        comment = (dp.get('comment') or '').lower()
-                        if 'night_logger' in comment or 'night logger' in comment or 'auto-logged' in comment:
-                            authorized_datapoints.append((date_str, dp))
-                        else:
-                            # Manual entry on violation date - delete for tamper resistance
-                            unauthorized_datapoints.append(dp)
-                except (ValueError, TypeError):
-                    # Invalid timestamp, mark for deletion
-                    unauthorized_datapoints.append(dp)
+            date_str = datetime.fromtimestamp(dp['timestamp']).strftime('%Y-%m-%d')
+            if date_str in beeminder_by_date:
+                # Found duplicate - mark older one for deletion
+                existing_dp = beeminder_by_date[date_str]
+                if dp['timestamp'] > existing_dp['timestamp']:
+                    # This datapoint is newer, delete the existing one
+                    duplicates_to_delete.append(existing_dp)
+                    beeminder_by_date[date_str] = dp
+                else:
+                    # Existing datapoint is newer, delete this one
+                    duplicates_to_delete.append(dp)
             else:
-                # No timestamp, mark for deletion
-                unauthorized_datapoints.append(dp)
+                beeminder_by_date[date_str] = dp
 
-        # Check for duplicate authorized datapoints (multiple entries for same date)
-        from collections import defaultdict
-        by_date = defaultdict(list)
-        for date_str, dp in authorized_datapoints:
-            by_date[date_str].append(dp)
-
-        # Keep only one datapoint per date (remove all duplicates)
-        for date_str, dps in by_date.items():
-            if len(dps) > 1:
-                # Sort by timestamp, then by ID for deterministic ordering
-                dps.sort(key=lambda x: (int(float(x['timestamp'])), x['id']))
-                # Mark all but the last one for deletion
-                for dp in dps[:-1]:
-                    unauthorized_datapoints.append(dp)
-
-        if unauthorized_datapoints:
-            print(f"🗑️  Found {len(unauthorized_datapoints)} unauthorized datapoints to remove")
-
-            removed_count = 0
-            for dp in unauthorized_datapoints:
+        # Delete duplicate datapoints first
+        if duplicates_to_delete:
+            print(f"🧹 Found {len(duplicates_to_delete)} duplicate datapoints to clean up")
+            for dp in duplicates_to_delete:
                 dp_id = dp.get('id')
-                if dp_id:
-                    timestamp = dp.get('timestamp', 'unknown')
-                    try:
-                        dt = datetime.fromtimestamp(int(float(timestamp)))
-                        date_str = dt.strftime('%Y-%m-%d %H:%M')
-                    except:
-                        date_str = 'invalid timestamp'
+                if dp_id and self.beeminder.delete_datapoint(self.beeminder_goal, str(dp_id)):
+                    date_str = datetime.fromtimestamp(dp['timestamp']).strftime('%Y-%m-%d')
+                    print(f"🗑️  Deleted duplicate datapoint for {date_str}")
 
-                    comment = (dp.get('comment') or '')[:50]
-                    print(f"  Removing: {date_str} - {comment}")
+        # Refresh Beeminder datapoints after duplicate cleanup
+        if duplicates_to_delete:
+            beeminder_datapoints = self.beeminder.get_goal_datapoints(self.beeminder_goal)
+            beeminder_by_date = {}
+            for dp in beeminder_datapoints:
+                date_str = datetime.fromtimestamp(dp['timestamp']).strftime('%Y-%m-%d')
+                beeminder_by_date[date_str] = dp
 
-                    success = self.beeminder.delete_datapoint(self.beeminder_goal, str(dp_id))
-                    if success:
-                        removed_count += 1
+        print(f"📊 Current state: {len(sot_violations)} SoT violations, {len(beeminder_by_date)} Beeminder datapoints")
 
-            print(f"✅ Removed {removed_count}/{len(unauthorized_datapoints)} unauthorized datapoints")
+        # Find differences
+        sot_dates = set(sot_violations.keys())
+        beeminder_dates = set(beeminder_by_date.keys())
+
+        to_create = sot_dates - beeminder_dates  # In SoT but not in Beeminder
+        to_delete = beeminder_dates - sot_dates  # In Beeminder but not in SoT
+        to_check = sot_dates & beeminder_dates   # In both - check if they match
+
+        # Check for datapoints that need updating
+        to_update = set()
+        for date in to_check:
+            sot_violation = sot_violations[date]
+            beeminder_dp = beeminder_by_date[date]
+
+            # Convert SoT timestamp to Unix for comparison
+            iso_timestamp = sot_violation['timestamp']
+            if iso_timestamp.endswith('Z'):
+                iso_timestamp = iso_timestamp[:-1] + '+00:00'
+            dt = datetime.fromisoformat(iso_timestamp)
+            sot_unix_timestamp = int(dt.timestamp())
+
+            # Check if they differ (timestamp, value, or comment)
+            if (abs(beeminder_dp['timestamp'] - sot_unix_timestamp) > 1 or  # Allow 1s tolerance
+                beeminder_dp.get('value', 0) != sot_violation['value'] or
+                beeminder_dp.get('comment', '') != sot_violation['comment']):
+                to_update.add(date)
+
+        print(f"📋 Changes needed: {len(to_create)} create, {len(to_delete)} delete, {len(to_update)} update")
+
+        # Apply changes
+        changes_made = 0
+
+        # Delete extra datapoints
+        for date in to_delete:
+            dp = beeminder_by_date[date]
+            dp_id = dp.get('id')
+            if dp_id and self.beeminder.delete_datapoint(self.beeminder_goal, str(dp_id)):
+                print(f"🗑️  Deleted unauthorized datapoint for {date}")
+                changes_made += 1
+
+        # Update changed datapoints (delete + recreate)
+        for date in to_update:
+            dp = beeminder_by_date[date]
+            dp_id = dp.get('id')
+            if dp_id and self.beeminder.delete_datapoint(self.beeminder_goal, str(dp_id)):
+                if self.beeminder.create_datapoint(self.beeminder_goal, sot_violations[date]):
+                    print(f"🔄 Updated datapoint for {date}")
+                    changes_made += 1
+                else:
+                    print(f"❌ Failed to recreate updated datapoint for {date}")
+
+        # Create missing datapoints
+        for date in to_create:
+            if self.beeminder.create_datapoint(self.beeminder_goal, sot_violations[date]):
+                print(f"➕ Created new datapoint for {date}")
+                changes_made += 1
+
+        if changes_made == 0:
+            print("✅ No changes needed - Beeminder is already in sync with SoT")
         else:
-            print("✅ No unauthorized datapoints found")
+            print(f"✅ Applied {changes_made} changes to sync Beeminder with SoT")
 
     def sync_violations_to_beeminder(self, violations_file: str) -> None:
-        """Sync violations to Beeminder with cleanup of unauthorized datapoints"""
+        """Sync violations to Beeminder using selective sync (prevents derailment)"""
         print("🔄 Syncing violations to Beeminder...")
 
         # Load violations data
         violations_data = self.load_violations(violations_file)
 
-        # Step 1: Clean up unauthorized datapoints (SoT is authoritative)
-        self.cleanup_unauthorized_datapoints(violations_data)
-
-        # Step 2: Add new violations
-        unposted_violations = violations_data.get('unposted_violations', [])
-
-        if not unposted_violations:
-            print("ℹ️  No unposted violations to sync")
+        if not violations_data.get('violations'):
+            print("ℹ️  No violations in SoT database")
             return
 
-        print(f"📊 Found {len(unposted_violations)} unposted violations")
+        # Use selective sync instead of nuclear cleanup
+        self.selective_sync_datapoints(violations_data)
 
-        # Get existing Beeminder datapoints after cleanup
+    def nuclear_cleanup_and_sync(self, violations_file: str) -> None:
+        """Nuclear option: Remove ALL datapoints and recreate from SoT (for emergencies)"""
+        print("💥 NUCLEAR CLEANUP - removing ALL datapoints and recreating...")
+
+        violations_data = self.load_violations(violations_file)
+
+        # Step 1: Nuclear cleanup
         beeminder_datapoints = self.beeminder.get_goal_datapoints(self.beeminder_goal)
+        if beeminder_datapoints:
+            print(f"🗑️  Removing all {len(beeminder_datapoints)} existing datapoints")
+            removed_count = 0
+            for dp in beeminder_datapoints:
+                dp_id = dp.get('id')
+                if dp_id and self.beeminder.delete_datapoint(self.beeminder_goal, str(dp_id)):
+                    removed_count += 1
+            print(f"✅ Removed {removed_count}/{len(beeminder_datapoints)} datapoints")
 
-        # Extract dates from existing night_logger datapoints
-        existing_dates = set()
-        for dp in beeminder_datapoints:
-            comment = (dp.get('comment') or '').lower()
-            if 'night_logger' in comment or 'night logger' in comment:
-                # Extract date from timestamp
-                timestamp = dp.get('timestamp')
-                if timestamp:
-                    try:
-                        dt = datetime.fromtimestamp(int(float(timestamp)))
-                        date_str = dt.strftime('%Y-%m-%d')
-                        existing_dates.add(date_str)
-                    except (ValueError, TypeError):
-                        pass
-
-        # Sync only new violations
-        new_violations = [v for v in unposted_violations if v['date'] not in existing_dates]
-
-        if not new_violations:
-            print("ℹ️  All violations already exist in Beeminder")
-            return
-
-        print(f"📝 Syncing {len(new_violations)} new violations to Beeminder")
-
-        success_count = 0
-        for violation in new_violations:
-            if self.beeminder.create_datapoint(self.beeminder_goal, violation):
-                success_count += 1
-
-        print(f"✅ Successfully synced {success_count}/{len(new_violations)} violations")
+        # Step 2: Recreate all
+        all_violations = violations_data.get('violations', [])
+        if all_violations:
+            print(f"📊 Recreating {len(all_violations)} violations from SoT database")
+            success_count = 0
+            for violation in all_violations:
+                if self.beeminder.create_datapoint(self.beeminder_goal, violation):
+                    success_count += 1
+            print(f"✅ Successfully recreated {success_count}/{len(all_violations)} violations")
 
 def main():
     parser = argparse.ArgumentParser(description="Violations-Only Sync to Beeminder")
     parser.add_argument('--violations-file', default='violations.json',
                        help='Violations JSON file (default: violations.json)')
+    parser.add_argument('--nuclear-cleanup', action='store_true',
+                       help='Use nuclear cleanup: delete ALL datapoints and recreate (emergency use only)')
 
     args = parser.parse_args()
 
     try:
         sync = ViolationsSync()
-        sync.sync_violations_to_beeminder(args.violations_file)
+
+        if args.nuclear_cleanup:
+            sync.nuclear_cleanup_and_sync(args.violations_file)
+        else:
+            sync.sync_violations_to_beeminder(args.violations_file)
+
         print("✅ Violations sync completed successfully!")
 
     except Exception as e:

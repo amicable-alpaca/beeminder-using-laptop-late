@@ -4,11 +4,11 @@ Automatically track and report late-night computer usage (23:00-03:59) to Beemin
 
 ## 🔒 Tamper-Resistant Architecture
 
-**Flow**: `Local Computer (HSoT) → GitHub (SoT) → Beeminder`
+**Flow**: `Local Computer (HSoT) → violations.json → GitHub → Beeminder`
 
 - **HSoT Database**: Highest Source of Truth on local computer (`/var/lib/night-logger/night_logs.db`)
-- **SoT Database**: Source of Truth hosted on GitHub (public audit trail)
-- **Beeminder**: Display/notification layer (gets overwritten by SoT)
+- **violations.json**: Processed violation data uploaded to GitHub (public audit trail)
+- **Beeminder**: Display/notification layer (gets selectively synced)
 
 This prevents manual tampering since GitHub Actions automatically restores any deleted/modified Beeminder data.
 
@@ -36,7 +36,7 @@ python3 test_comprehensive.py
 
 - **Monitors**: Computer usage between 23:00-03:59 local time
 - **Logs**: Samples every 5 seconds (1 = night time, 0 = day time)
-- **Syncs**: Local → GitHub → Beeminder with automatic reconciliation
+- **Syncs**: Local → violations.json → GitHub → Beeminder with selective updates
 - **Protects**: Against manual data tampering via immutable GitHub audit trail
 
 ## System Components
@@ -49,9 +49,9 @@ python3 test_comprehensive.py
 - **Environment**: `/home/admin/.env` - GitHub API credentials
 
 ### GitHub Actions (Repository)
-- **Workflow**: `.github/workflows/sync-nightlogger.yml` - Daily sync at 12 PM NYC
-- **Sync Script**: `sync_nightlogger.py` - Handles HSoT → SoT → Beeminder sync
-- **SoT Database**: `sot_database.db` - GitHub-hosted source of truth
+- **Workflow**: `.github/workflows/sync-violations.yml` - Daily sync at 12 PM NYC
+- **Sync Script**: `sync_violations.py` - Handles violations.json → Beeminder selective sync
+- **violations.json**: GitHub-hosted violations data (1KB vs 50KB+ database)
 
 ## Commands
 
@@ -75,9 +75,9 @@ nightlog fix-db    # Fix database access issues
 ## Repository Files
 
 ### Core Tamper-Resistant System
-- `night_logger_github.py` - Modified night logger (triggers GitHub instead of Beeminder)
-- `sync_nightlogger.py` - GitHub Actions sync program with Beeminder pagination
-- `.github/workflows/sync-nightlogger.yml` - GitHub Actions workflow
+- `night_logger_github.py` - Night logger (generates violations.json and uploads to GitHub)
+- `sync_violations.py` - GitHub Actions sync program with selective updates and Beeminder pagination
+- `.github/workflows/sync-violations.yml` - GitHub Actions workflow
 - `test_comprehensive.py` - Complete test suite (26 tests, 100% coverage)
 
 ### Documentation & Setup

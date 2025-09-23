@@ -67,10 +67,10 @@ nightlog fix-db    # Fix database access issues
 
 ## Current Status
 
-- **Database**: 4,806 log entries across 17 posted days (last: 2025-09-19)
+- **Database**: 20+ violations tracked across multiple posted days
 - **Schedule**: Runs automatically at 22:55, stops at 04:05
 - **Permissions**: Admin users can read database via `nightlog-readers` group
-- **Architecture**: Tamper-resistant system fully deployed
+- **Architecture**: Tamper-resistant system fully deployed with dual branch uploads
 
 ## Repository Files
 
@@ -78,7 +78,7 @@ nightlog fix-db    # Fix database access issues
 - `night_logger_github.py` - Night logger (generates violations.json and uploads to GitHub)
 - `sync_violations.py` - GitHub Actions sync program with selective updates and Beeminder pagination
 - `.github/workflows/sync-violations.yml` - GitHub Actions workflow
-- `test_comprehensive.py` - Complete test suite (26 tests, 100% coverage)
+- `test_comprehensive.py` - Complete test suite (38 tests, 100% coverage)
 
 ### Documentation & Setup
 - `SETUP_TAMPER_RESISTANT.md` - Complete deployment guide

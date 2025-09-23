@@ -8,18 +8,19 @@ The Night Logger system automatically tracks computer usage between 23:00-03:59 
 
 ### Current System (Tamper-Resistant)
 ```
-Local Computer (HSoT) → GitHub (SoT) → Beeminder (Display)
+Local Computer (HSoT) → violations.json → GitHub → Beeminder (Display)
 ```
 
-- **HSoT Database**: Highest Source of Truth - Local computer database
-- **SoT Database**: Source of Truth hosted on GitHub with public audit trail
-- **Beeminder**: Display/notification layer (automatically synchronized)
+- **HSoT Database**: Highest Source of Truth - Local computer database (`/var/lib/night-logger/night_logs.db`)
+- **violations.json**: Processed violation data uploaded to GitHub (1KB vs 50KB+ database)
+- **Beeminder**: Display/notification layer (selectively synchronized)
 
 ### Data Flow
 1. **Local Detection**: Night usage triggers local logging
-2. **GitHub Upload**: HSoT database uploaded to GitHub branch
-3. **GitHub Actions**: Workflow synchronizes all databases
-4. **Tamper Protection**: Manual Beeminder edits automatically overwritten
+2. **violations.json Generation**: HSoT database processed into compact violations.json
+3. **Dual Branch Upload**: violations.json uploaded to both main and violations-data branches
+4. **GitHub Actions**: Workflow uses selective sync with Beeminder API pagination
+5. **Tamper Protection**: Manual Beeminder edits selectively corrected
 
 ## Core Components
 
@@ -38,7 +39,7 @@ Local Computer (HSoT) → GitHub (SoT) → Beeminder (Display)
 - **Location**: `/var/lib/night-logger/`
 - **Main DB (HSoT)**: `night_logs.db` (root:nightlog-readers, 640 permissions)
 - **Read-only Copy**: `night_logs_ro.db` (root:nightlog-readers, 640 permissions)
-- **Current Data**: 4,806 log entries, 17 posted days (last: 2025-09-19)
+- **Current Data**: 20+ violations tracked across multiple posted days
 
 #### Database Schema
 ```sql
@@ -81,7 +82,7 @@ CREATE TABLE posts (
 ### 2. GitHub Actions System
 
 #### Workflow File
-- **Location**: `.github/workflows/sync-nightlogger.yml`
+- **Location**: `.github/workflows/sync-violations.yml`
 - **Triggers**:
   - Repository dispatch (night-logger-sync) from local system
   - Daily schedule at 12 PM NYC time (17:00 UTC)
@@ -89,14 +90,14 @@ CREATE TABLE posts (
 - **Environment**: Beeminder credentials from GitHub secrets
 
 #### Sync Program
-- **File**: `sync_nightlogger.py` (380 lines)
-- **Purpose**: Three-tier database synchronization
+- **File**: `sync_violations.py`
+- **Purpose**: Violations-only selective synchronization
 - **Features**:
-  - Downloads HSoT database from GitHub branch
-  - Syncs HSoT → SoT (HSoT is authoritative)
-  - Syncs SoT → Beeminder (SoT is authoritative)
+  - Downloads fresh violations.json from main branch
+  - Uses selective sync: only adds/updates/deletes datapoints as needed
   - Handles Beeminder API pagination (300+ datapoints)
-  - Commits updated SoT database to repository
+  - Prevents goal derailment by preserving existing valid data
+  - No database uploads - works purely with violations.json
 
 ### 3. Configuration Files
 
@@ -134,15 +135,17 @@ CREATE TABLE posts (
 
 ### Core System
 - `night_logger_github.py` - Tamper-resistant night logger application
-- `sync_nightlogger.py` - GitHub Actions synchronization program
-- `.github/workflows/sync-nightlogger.yml` - GitHub Actions workflow
+- `sync_violations.py` - GitHub Actions synchronization program with selective updates
+- `.github/workflows/sync-violations.yml` - GitHub Actions workflow
 
 ### Testing & Validation
-- `test_comprehensive.py` - Complete test suite (26 tests, 100% success rate)
+- `test_comprehensive.py` - Complete test suite (38 tests, 100% success rate)
   - Core functionality testing
   - GitHub/Beeminder API testing
   - System integration testing
   - Security and performance testing
+  - Dual branch upload testing
+  - Advanced sync features testing
 
 ### Documentation
 - `README.md` - Quick start guide and project overview
@@ -175,31 +178,32 @@ CREATE TABLE posts (
 ### Daily Cycle
 1. **22:55 Daily**: Timer starts night-logger.service
 2. **23:00-03:59**: Service logs 1/0 values every 5 seconds to HSoT database
-3. **First "1" value**: Service uploads HSoT to GitHub, triggers workflow, exits
-4. **GitHub Actions**: Downloads HSoT, syncs to SoT, syncs SoT to Beeminder
+3. **First "1" value**: Service generates violations.json from HSoT, uploads to both main and violations-data branches, triggers workflow, exits
+4. **GitHub Actions**: Downloads fresh violations.json from main branch, uses selective sync with Beeminder
 5. **04:05 Daily**: Timer stops any running service
 6. **12:00 PM NYC**: Scheduled sync ensures data integrity
 
 ### Tamper Resistance
-- **Manual Beeminder Edits**: Automatically overwritten by next sync
+- **Manual Beeminder Edits**: Selectively corrected by next sync
 - **Data Integrity**: GitHub commit history provides immutable audit trail
-- **Redundancy**: Three-tier backup (HSoT → SoT → Beeminder)
+- **Redundancy**: Multi-tier backup (HSoT → violations.json → Beeminder)
 - **Transparency**: All changes visible in public GitHub repository
+- **Race Condition Protection**: Dual branch uploads and database copy fallback
 
 ## System Status (Current)
 
 ### Active Configuration
-- **Architecture**: Tamper-resistant system fully deployed
+- **Architecture**: Tamper-resistant system fully deployed with dual branch uploads
 - **Service**: Running as "Night Logger (Beeminder) - Tamper Resistant"
-- **Database**: 4,806 log entries across 17 posted days
-- **Last Activity**: 2025-09-19
+- **Database**: 20+ violations tracked across multiple posted days
 - **Schedule**: Active timers for 22:55 start, 04:05 stop
+- **Testing**: 38 tests, 100% coverage
 
 ### Data Statistics
-- **Total Logs**: 4,806 entries
-- **Night Logs**: 23 entries (is_night=1)
-- **Posted Days**: 17 days successfully posted
-- **Database Size**: ~184KB
+- **Total Violations**: 20+ violations tracked
+- **Posted Days**: Multiple days successfully posted
+- **Unposted Violations**: 2 pending sync
+- **Database**: SQLite with WAL mode, copy fallback for concurrent access
 - **Permissions**: Admin users have read access via nightlog-readers group
 
 ## Usage Examples
@@ -270,9 +274,10 @@ Local System:
 /etc/systemd/system/night-logger.service # Service config
 
 Repository:
-sync_nightlogger.py                      # Sync program
-.github/workflows/sync-nightlogger.yml   # GitHub Actions
-test_comprehensive.py                    # Test suite
+sync_violations.py                       # Sync program (selective)
+.github/workflows/sync-violations.yml    # GitHub Actions
+test_comprehensive.py                    # Test suite (38 tests)
+violations.json                          # Current violations data
 ```
 
 This system provides robust automated tracking with comprehensive error handling, security hardening, tamper resistance, and administrative tools for maintenance and troubleshooting.

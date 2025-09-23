@@ -5,12 +5,12 @@ This guide explains how to set up the tamper-resistant version of the Night Logg
 ## Architecture Overview
 
 ```
-Local Computer (HSoT) -> GitHub (SoT) -> Beeminder (Display)
+Local Computer (HSoT) -> violations.json -> GitHub -> Beeminder (Display)
 ```
 
-- **HSoT DB**: Highest Source of Truth - Local computer database
-- **SoT DB**: Source of Truth - GitHub-hosted database
-- **Beeminder**: Display/notification layer (gets overwritten by SoT)
+- **HSoT DB**: Highest Source of Truth - Local computer database (`/var/lib/night-logger/night_logs.db`)
+- **violations.json**: Processed violation data uploaded to GitHub (1KB vs 50KB+ database)
+- **Beeminder**: Display/notification layer (gets selectively synced)
 
 ## Setup Steps
 
@@ -56,8 +56,8 @@ Local Computer (HSoT) -> GitHub (SoT) -> Beeminder (Display)
 
 4. **System Status** (✅ Active):
    - Service running as "Night Logger (Beeminder) - Tamper Resistant"
-   - Database: 4,806 log entries, 17 posted days
-   - Last activity: 2025-09-19
+   - Database: 20+ violations tracked across multiple posted days
+   - Architecture: Dual branch uploads (main + violations-data)
 
 ### 3. Testing & Verification
 
@@ -65,7 +65,7 @@ Local Computer (HSoT) -> GitHub (SoT) -> Beeminder (Display)
    ```bash
    python3 test_comprehensive.py
    ```
-   Expected: 26 tests, 100% success rate
+   Expected: 38 tests, 100% success rate
 
 2. **Check Local System Status**:
    ```bash
@@ -89,26 +89,28 @@ Local Computer (HSoT) -> GitHub (SoT) -> Beeminder (Display)
 
 1. **Night Usage Detected** (23:00-03:59):
    - Local computer logs usage to HSoT database
-   - On first detection, uploads HSoT database to GitHub
+   - On first detection, generates violations.json from HSoT
+   - Uploads violations.json to both main and violations-data branches
    - Triggers GitHub Actions workflow
 
 2. **GitHub Actions Workflow**:
-   - Downloads HSoT database from GitHub branch
-   - Syncs HSoT → SoT (HSoT overwrites SoT)
-   - Syncs SoT → Beeminder (SoT overwrites Beeminder)
-   - Commits updated SoT database to repository
+   - Downloads fresh violations.json from main branch
+   - Uses selective sync: only adds/updates/deletes datapoints as needed
+   - Preserves existing Beeminder data (prevents goal derailment)
+   - No database uploads - works purely with violations.json
 
 3. **Scheduled Sync** (12 PM NYC time):
    - Daily verification sync runs automatically
-   - Ensures Beeminder stays in sync with SoT database
-   - Restores any manually deleted/modified Beeminder data
+   - Ensures Beeminder stays in sync with violations.json
+   - Handles any missed violations or corrections
 
 ### Tamper Resistance
 
-- **Manual Beeminder Edits**: Automatically overwritten by GitHub Actions
+- **Manual Beeminder Edits**: Selectively corrected by GitHub Actions
 - **Data Integrity**: GitHub commit history provides audit trail
-- **Redundancy**: Multiple backup points (local HSoT, GitHub SoT, Beeminder)
+- **Redundancy**: Multiple backup points (local HSoT, GitHub violations.json, Beeminder)
 - **Transparency**: All changes visible in public GitHub repository
+- **Race Condition Protection**: Dual branch uploads and database copy fallback
 
 ## Troubleshooting
 
@@ -126,9 +128,9 @@ Local Computer (HSoT) -> GitHub (SoT) -> Beeminder (Display)
    - Check repository_dispatch trigger is configured
    - Verify workflow file is in `.github/workflows/`
 
-4. **Database Sync Issues**:
+4. **Violations Sync Issues**:
    - Check GitHub Actions logs for detailed error messages
-   - Verify HSoT database upload succeeded
+   - Verify violations.json upload succeeded to both branches
 
 ### Viewing Logs
 
@@ -147,8 +149,9 @@ Local Computer (HSoT) -> GitHub (SoT) -> Beeminder (Display)
 
 ## Files Overview
 
-- `night_logger_github.py`: Modified night logger (triggers GitHub instead of Beeminder)
-- `sync_nightlogger.py`: GitHub Actions sync program
-- `.github/workflows/sync-nightlogger.yml`: GitHub Actions workflow
+- `night_logger_github.py`: Tamper-resistant night logger (generates violations.json and uploads to GitHub)
+- `sync_violations.py`: GitHub Actions sync program with selective updates and Beeminder pagination
+- `.github/workflows/sync-violations.yml`: GitHub Actions workflow
+- `test_comprehensive.py`: Complete test suite (38 tests, 100% coverage)
 - `.env.template`: Environment template for local setup
 - `SETUP_TAMPER_RESISTANT.md`: This setup guide

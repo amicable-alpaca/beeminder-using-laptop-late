@@ -55,7 +55,7 @@ jobs:
 
         if [ -s violations.json ]; then
           echo "✅ Downloaded violations.json from main branch"
-          python3 -c 'import json; data = json.load(open("violations.json")); print(f"Found {len(data.get(\"unposted_violations\", []))} unposted violations out of {len(data.get(\"violations\", []))} total")'
+          python3 -c 'import json; data = json.load(open("violations.json")); unposted = len(data.get("unposted_violations", [])); total = len(data.get("violations", [])); print(f"Found {unposted} unposted violations out of {total} total")'
         else
           echo "ℹ️  Empty or missing violations.json"
         fi

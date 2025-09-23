@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 import requests
+import shutil
 
 # Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -833,6 +834,260 @@ class TestTimestampHandling(unittest.TestCase):
             self.assertEqual(len(violations['violations']), len(leap_year_cases))
 
 
+class TestDualBranchUpload(unittest.TestCase):
+    """Test dual branch upload functionality"""
+
+    def setUp(self):
+        self.test_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        self.test_db.close()
+
+    def tearDown(self):
+        try:
+            os.unlink(self.test_db.name)
+        except:
+            pass
+
+    @patch('night_logger_github.requests.get')
+    @patch('night_logger_github.requests.post')
+    @patch('night_logger_github.requests.put')
+    def test_dual_branch_upload_success(self, mock_put, mock_post, mock_get):
+        """Test successful upload to both main and violations-data branches"""
+        # Setup mocks for successful responses
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.json.return_value = {"sha": "test-sha"}
+        mock_put.return_value.status_code = 200
+        mock_put.return_value.raise_for_status.return_value = None
+
+        # Create test database with violation
+        conn = open_db(self.test_db.name)
+        conn.execute("INSERT INTO logs (is_night) VALUES (1)")
+        conn.commit()
+        conn.close()
+
+        # Test dual upload
+        github_api = GitHubAPI("test-token", "test/repo")
+
+        # Should call upload_violations_to_branch twice
+        result1 = github_api.upload_violations_to_branch(self.test_db.name, "violations-data")
+        result2 = github_api.upload_violations_to_branch(self.test_db.name, "main")
+
+        self.assertTrue(result1)
+        self.assertTrue(result2)
+
+    @patch('night_logger_github.requests.get')
+    @patch('night_logger_github.requests.put')
+    def test_dual_branch_upload_partial_failure(self, mock_put, mock_get):
+        """Test when one branch upload fails"""
+        # Setup mocks - first succeeds, second fails
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.json.return_value = {"sha": "test-sha"}
+
+        # First upload succeeds, second fails
+        mock_put.side_effect = [
+            unittest.mock.Mock(status_code=200),  # First upload succeeds
+            requests.exceptions.RequestException("Network error")  # Second fails
+        ]
+
+        # Create test database
+        conn = open_db(self.test_db.name)
+        conn.execute("INSERT INTO logs (is_night) VALUES (1)")
+        conn.commit()
+        conn.close()
+
+        github_api = GitHubAPI("test-token", "test/repo")
+
+        result1 = github_api.upload_violations_to_branch(self.test_db.name, "violations-data")
+        result2 = github_api.upload_violations_to_branch(self.test_db.name, "main")
+
+        self.assertTrue(result1)
+        self.assertFalse(result2)
+
+
+class TestAdvancedSyncFeatures(unittest.TestCase):
+    """Test advanced sync features like nuclear cleanup and datapoint updates"""
+
+    def setUp(self):
+        self.violations_data = {
+            "violations": [
+                {
+                    "date": "2025-08-15",
+                    "timestamp": "2025-08-15T06:12:14.942Z",
+                    "value": 1,
+                    "comment": "Night logger violation (2 detections)",
+                    "daystamp": "20250815"
+                }
+            ],
+            "posted_dates": [],
+            "unposted_violations": []
+        }
+
+    @patch.dict(os.environ, {
+        'BEEMINDER_USERNAME': 'testuser',
+        'BEEMINDER_AUTH_TOKEN': 'testtoken',
+        'BEEMINDER_GOAL_SLUG': 'testgoal'
+    })
+    @patch('sync_violations.requests.get')
+    @patch('sync_violations.requests.delete')
+    def test_nuclear_cleanup(self, mock_delete, mock_get):
+        """Test nuclear cleanup functionality"""
+        # Mock existing datapoints
+        mock_datapoints = [
+            {"id": "dp1", "timestamp": 1692086400, "value": 1, "comment": "old data"},
+            {"id": "dp2", "timestamp": 1692172800, "value": 1, "comment": "old data"}
+        ]
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.json.return_value = mock_datapoints
+        mock_get.return_value.raise_for_status.return_value = None
+
+        mock_delete.return_value.status_code = 200
+        mock_delete.return_value.raise_for_status.return_value = None
+
+        # Create violations file
+        violations_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        json.dump(self.violations_data, violations_file)
+        violations_file.close()
+
+        try:
+            sync = ViolationsSync()
+
+            # Test nuclear cleanup
+            with patch.object(sync.beeminder, 'create_datapoint', return_value=True) as mock_create:
+                sync.nuclear_cleanup_and_sync(violations_file.name)
+
+                # Should delete all existing datapoints
+                self.assertEqual(mock_delete.call_count, 2)
+
+                # Should recreate from violations
+                self.assertEqual(mock_create.call_count, 1)
+
+        finally:
+            os.unlink(violations_file.name)
+
+    @patch.dict(os.environ, {
+        'BEEMINDER_USERNAME': 'testuser',
+        'BEEMINDER_AUTH_TOKEN': 'testtoken',
+        'BEEMINDER_GOAL_SLUG': 'testgoal'
+    })
+    @patch('sync_violations.requests.get')
+    @patch('sync_violations.requests.delete')
+    @patch('sync_violations.requests.post')
+    def test_datapoint_update_scenario(self, mock_post, mock_delete, mock_get):
+        """Test datapoint update (delete + recreate) scenario"""
+        # Mock existing datapoint with different comment
+        mock_datapoints = [{
+            "id": "dp1",
+            "timestamp": 1692086400,  # 2025-08-15 timestamp
+            "value": 1,
+            "comment": "old comment"  # Different from violations data
+        }]
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.json.return_value = mock_datapoints
+        mock_get.return_value.raise_for_status.return_value = None
+
+        mock_delete.return_value.status_code = 200
+        mock_delete.return_value.raise_for_status.return_value = None
+
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.raise_for_status.return_value = None
+
+        # Create violations file
+        violations_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        json.dump(self.violations_data, violations_file)
+        violations_file.close()
+
+        try:
+            sync = ViolationsSync()
+            sync.selective_sync_datapoints(self.violations_data)
+
+            # Should delete old datapoint and create new one (update scenario)
+            self.assertTrue(mock_delete.called)
+            self.assertTrue(mock_post.called)
+
+        finally:
+            os.unlink(violations_file.name)
+
+    @patch.dict(os.environ, {
+        'BEEMINDER_USERNAME': 'testuser',
+        'BEEMINDER_AUTH_TOKEN': 'testtoken',
+        'BEEMINDER_GOAL_SLUG': 'testgoal'
+    })
+    @patch('sync_violations.requests.get')
+    @patch('sync_violations.requests.delete')
+    def test_duplicate_datapoint_cleanup(self, mock_delete, mock_get):
+        """Test cleanup of duplicate datapoints"""
+        # Mock duplicate datapoints for same date
+        mock_datapoints = [
+            {"id": "dp1", "timestamp": 1692086400, "value": 1, "comment": "first"},  # Same date
+            {"id": "dp2", "timestamp": 1692086460, "value": 1, "comment": "second"}, # Same date, 1 min later
+            {"id": "dp3", "timestamp": 1692172800, "value": 1, "comment": "different date"}
+        ]
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.json.return_value = mock_datapoints
+        mock_get.return_value.raise_for_status.return_value = None
+
+        mock_delete.return_value.status_code = 200
+        mock_delete.return_value.raise_for_status.return_value = None
+
+        # Create violations file
+        violations_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        json.dump(self.violations_data, violations_file)
+        violations_file.close()
+
+        try:
+            sync = ViolationsSync()
+            sync.selective_sync_datapoints(self.violations_data)
+
+            # Should delete one of the duplicate datapoints
+            self.assertTrue(mock_delete.called)
+
+        finally:
+            os.unlink(violations_file.name)
+
+
+class TestExtractViolationsEnhanced(unittest.TestCase):
+    """Test enhanced extract_violations functionality"""
+
+    def setUp(self):
+        self.test_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        self.test_db.close()
+
+    def tearDown(self):
+        try:
+            os.unlink(self.test_db.name)
+        except:
+            pass
+
+    def test_extract_violations_nonexistent_database(self):
+        """Test extract_violations with nonexistent database"""
+        nonexistent_path = "/tmp/nonexistent_db_12345.db"
+
+        violations_data = extract_violations(nonexistent_path)
+
+        # Should return empty structure
+        self.assertEqual(violations_data['violations'], [])
+        self.assertEqual(violations_data['posted_dates'], [])
+        self.assertEqual(violations_data['total_violations'], 0)
+        self.assertEqual(violations_data['unposted_violations'], [])
+
+    @patch('shutil.copy2')
+    def test_extract_violations_copy_fallback(self, mock_copy):
+        """Test extract_violations copy fallback when temp copy fails"""
+        # Setup database with data
+        conn = open_db(self.test_db.name)
+        conn.execute("INSERT INTO logs (is_night) VALUES (1)")
+        conn.commit()
+        conn.close()
+
+        # Mock copy failure
+        mock_copy.side_effect = Exception("Copy failed")
+
+        # Should fall back to direct access
+        violations_data = extract_violations(self.test_db.name)
+
+        # Should still extract data successfully
+        self.assertGreater(len(violations_data['violations']), 0)
+
+
 def run_all_tests():
     """Run all tests with detailed output"""
     # Create test suite
@@ -850,7 +1105,10 @@ def run_all_tests():
         TestNightTimeAttribution,
         TestErrorHandlingEnhanced,
         TestRaceConditions,
-        TestTimestampHandling
+        TestTimestampHandling,
+        TestDualBranchUpload,
+        TestAdvancedSyncFeatures,
+        TestExtractViolationsEnhanced
     ]
 
     for test_class in test_classes:

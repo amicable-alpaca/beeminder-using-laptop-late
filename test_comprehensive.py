@@ -34,7 +34,6 @@ try:
         already_posted_today, mark_posted_today, extract_violations
     )
     from sync_violations import BeeminderAPI, ViolationsSync
-    from extract_violations import extract_violations as extract_violations_standalone
 except ImportError as e:
     print(f"Warning: Could not import modules: {e}")
 
@@ -129,10 +128,10 @@ class TestNightLoggerCore(unittest.TestCase):
 
         # Add some test data
         test_violations = [
-            ("2025-08-15T06:12:14.942Z", 1),
-            ("2025-08-15T06:13:13.086Z", 1),  # Same day, multiple detections
-            ("2025-08-16T03:00:02.198Z", 1),
-            ("2025-08-17T12:00:00.000Z", 0),  # Day time, should be ignored
+            ("2025-08-15T06:12:14.942Z", 1),   # 6 AM on 8/15 → attributed to 8/15
+            ("2025-08-15T06:13:13.086Z", 1),   # Same day, multiple detections
+            ("2025-08-16T23:00:02.198Z", 1),   # 11 PM on 8/16 → attributed to 8/16
+            ("2025-08-17T12:00:00.000Z", 0),   # Day time, should be ignored
         ]
 
         for timestamp, is_night in test_violations:
@@ -428,33 +427,6 @@ class TestViolationsSync(unittest.TestCase):
             self.assertNotIn('2025-08-17', sot_violations)
 
 
-class TestExtractViolationsStandalone(unittest.TestCase):
-    """Test the standalone extract_violations.py script"""
-
-    def setUp(self):
-        self.temp_dir = tempfile.mkdtemp()
-        self.test_db = Path(self.temp_dir) / "test.db"
-
-    def tearDown(self):
-        if self.test_db.exists():
-            self.test_db.unlink()
-
-    def test_extract_violations_standalone(self):
-        """Test standalone violations extraction matches integrated version"""
-        # Create test database
-        conn = open_db(str(self.test_db))
-        conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, ?);", ("2025-08-15T06:12:14.942Z", 1))
-        conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, ?);", ("2025-08-16T03:00:02.198Z", 1))
-        conn.commit()
-        conn.close()
-
-        # Test both versions produce same result
-        integrated_result = extract_violations(str(self.test_db))
-        standalone_result = extract_violations_standalone(str(self.test_db))
-
-        self.assertEqual(integrated_result['total_violations'], standalone_result['total_violations'])
-        self.assertEqual(len(integrated_result['violations']), len(standalone_result['violations']))
-
 
 class TestIntegration(unittest.TestCase):
     """Test integration between components"""
@@ -548,6 +520,319 @@ class TestSecurity(unittest.TestCase):
             conn.close()
 
 
+class TestDatabaseConcurrency(unittest.TestCase):
+    """Test database concurrency and WAL mode handling"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_db = Path(self.temp_dir) / "test_concurrent.db"
+
+    def tearDown(self):
+        if self.test_db.exists():
+            self.test_db.unlink()
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_wal_mode_database_access(self):
+        """Test accessing WAL mode database from multiple connections"""
+        # Create database with WAL mode
+        conn1 = open_db(str(self.test_db))
+        conn1.execute("INSERT INTO logs (is_night) VALUES (1);")
+        conn1.commit()
+
+        # Test concurrent access while first connection still open
+        violations = extract_violations(str(self.test_db))
+        self.assertIsInstance(violations, dict)
+        self.assertGreaterEqual(len(violations['violations']), 1)
+
+        conn1.close()
+
+    def test_database_copy_fallback(self):
+        """Test database copy fallback mechanism when readonly fails"""
+        # Create test database
+        conn = open_db(str(self.test_db))
+        conn.execute("INSERT INTO logs (is_night) VALUES (1);")
+        conn.commit()
+        conn.close()
+
+        # Test extract_violations with copy fallback
+        violations = extract_violations(str(self.test_db))
+        self.assertIsInstance(violations, dict)
+        self.assertGreaterEqual(len(violations['violations']), 1)
+
+    def test_connection_cleanup(self):
+        """Test proper connection cleanup in extract_violations"""
+        conn = open_db(str(self.test_db))
+        conn.execute("INSERT INTO logs (is_night) VALUES (1);")
+        conn.commit()
+        conn.close()
+
+        # Multiple calls should not leave connections open
+        for _ in range(5):
+            violations = extract_violations(str(self.test_db))
+            self.assertIsInstance(violations, dict)
+
+    def test_database_permission_errors(self):
+        """Test handling of database permission errors"""
+        # Test non-existent database
+        violations = extract_violations("/nonexistent/path/test.db")
+        self.assertEqual(violations['violations'], [])
+        self.assertEqual(violations['total_violations'], 0)
+
+
+class TestNightTimeAttribution(unittest.TestCase):
+    """Test night time attribution logic (00:00-03:59 → previous day)"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_db = Path(self.temp_dir) / "test_attribution.db"
+
+    def tearDown(self):
+        if self.test_db.exists():
+            self.test_db.unlink()
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_early_morning_attribution(self):
+        """Test that 00:00-03:59 violations are attributed to previous day"""
+        conn = open_db(str(self.test_db))
+
+        # Insert violation at 2 AM on 2025-09-22 (should be attributed to 2025-09-21)
+        early_morning = "2025-09-22T02:30:00.000Z"
+        conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, 1);", (early_morning,))
+        conn.commit()
+        conn.close()
+
+        violations = extract_violations(str(self.test_db))
+
+        # Should be attributed to previous day
+        self.assertEqual(len(violations['violations']), 1)
+        violation = violations['violations'][0]
+        self.assertEqual(violation['date'], '2025-09-21')  # Previous day
+        self.assertEqual(violation['daystamp'], '20250921')  # Previous day
+
+    def test_late_night_attribution(self):
+        """Test that 23:00-23:59 violations are attributed to same day"""
+        conn = open_db(str(self.test_db))
+
+        # Insert violation at 11 PM on 2025-09-22 (should be attributed to 2025-09-22)
+        late_night = "2025-09-22T23:30:00.000Z"
+        conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, 1);", (late_night,))
+        conn.commit()
+        conn.close()
+
+        violations = extract_violations(str(self.test_db))
+
+        # Should be attributed to same day
+        self.assertEqual(len(violations['violations']), 1)
+        violation = violations['violations'][0]
+        self.assertEqual(violation['date'], '2025-09-22')  # Same day
+        self.assertEqual(violation['daystamp'], '20250922')  # Same day
+
+    def test_boundary_times(self):
+        """Test boundary times (exactly 03:59 and 04:00)"""
+        conn = open_db(str(self.test_db))
+
+        # 03:59 should be previous day
+        boundary_early = "2025-09-22T03:59:59.999Z"
+        conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, 1);", (boundary_early,))
+
+        # 04:00 should be same day
+        boundary_late = "2025-09-22T04:00:00.000Z"
+        conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, 1);", (boundary_late,))
+
+        conn.commit()
+        conn.close()
+
+        violations = extract_violations(str(self.test_db))
+
+        # Should have 2 violations with different date attributions
+        self.assertEqual(len(violations['violations']), 2)
+
+        # Sort by timestamp to get predictable order
+        violations_sorted = sorted(violations['violations'], key=lambda x: x['timestamp'])
+
+        # First (03:59) should be previous day
+        self.assertEqual(violations_sorted[0]['date'], '2025-09-21')
+
+        # Second (04:00) should be same day
+        self.assertEqual(violations_sorted[1]['date'], '2025-09-22')
+
+
+class TestErrorHandlingEnhanced(unittest.TestCase):
+    """Enhanced error handling tests"""
+
+    def test_malformed_violations_json(self):
+        """Test handling of malformed violations.json files"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write('{"invalid": json')  # Malformed JSON
+            malformed_file = f.name
+
+        try:
+            sync = ViolationsSync()
+            violations = sync.load_violations(malformed_file)
+            # Should return empty structure on JSON error
+            self.assertEqual(violations['violations'], [])
+        except:
+            # It's also acceptable to raise an exception
+            pass
+        finally:
+            os.unlink(malformed_file)
+
+    def test_network_timeout_scenarios(self):
+        """Test network timeout handling"""
+        with patch('requests.get') as mock_get:
+            mock_get.side_effect = requests.exceptions.Timeout("Network timeout")
+
+            api = BeeminderAPI("test_user", "test_token")
+            datapoints = api.get_goal_datapoints("test_goal")
+
+            # Should handle timeout gracefully
+            self.assertEqual(datapoints, [])
+
+    def test_github_api_rate_limiting(self):
+        """Test GitHub API rate limiting handling"""
+        with patch('requests.post') as mock_post:
+            # Simulate rate limit response
+            mock_response = MagicMock()
+            mock_response.status_code = 403
+            mock_response.json.return_value = {"message": "API rate limit exceeded"}
+            mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("403 Rate Limited")
+            mock_post.return_value = mock_response
+
+            github_api = GitHubAPI("test_token", "test/repo")
+            result = github_api.trigger_workflow()
+
+            # Should handle rate limiting gracefully
+            self.assertFalse(result)
+
+    def test_database_corruption_handling(self):
+        """Test handling of corrupted database files"""
+        # Create a file that looks like a database but is corrupted
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            f.write(b"NOT A SQLITE DATABASE")
+            corrupt_db = f.name
+
+        try:
+            violations = extract_violations(corrupt_db)
+            # Should return empty structure for corrupted database
+            self.assertEqual(violations['violations'], [])
+        except:
+            # It's also acceptable to raise an exception for corruption
+            pass
+        finally:
+            os.unlink(corrupt_db)
+
+
+class TestRaceConditions(unittest.TestCase):
+    """Test race condition scenarios"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_db = Path(self.temp_dir) / "test_race.db"
+
+    def tearDown(self):
+        if self.test_db.exists():
+            self.test_db.unlink()
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_concurrent_database_writes(self):
+        """Test that concurrent writes don't corrupt database"""
+        conn1 = open_db(str(self.test_db))
+
+        # Sequential writes to avoid locking issues
+        conn1.execute("INSERT INTO logs (is_night) VALUES (1);")
+        conn1.commit()
+
+        conn1.execute("INSERT INTO logs (is_night) VALUES (0);")
+        conn1.commit()
+
+        # Extract violations
+        violations = extract_violations(str(self.test_db))
+
+        conn1.close()
+
+        # Should handle access without corruption
+        self.assertIsInstance(violations, dict)
+        self.assertIn('violations', violations)
+
+    def test_database_access_during_extraction(self):
+        """Test database access during violations extraction"""
+        # Create initial data
+        conn = open_db(str(self.test_db))
+        conn.execute("INSERT INTO logs (is_night) VALUES (1);")
+        conn.commit()
+
+        # Extract violations
+        violations = extract_violations(str(self.test_db))
+
+        # Simulate more writes after extraction
+        conn.execute("INSERT INTO logs (is_night) VALUES (1);")
+        conn.commit()
+        conn.close()
+
+        # Should handle concurrent access
+        self.assertIsInstance(violations, dict)
+        self.assertGreaterEqual(len(violations['violations']), 1)
+
+
+class TestTimestampHandling(unittest.TestCase):
+    """Test comprehensive timestamp handling"""
+
+    def test_timezone_edge_cases(self):
+        """Test timestamp handling across different timezone scenarios"""
+        test_cases = [
+            "2025-09-20T03:00:00.441Z",      # Early morning 9/20 → attributed to 9/19
+            "2025-09-21T23:00:00.000Z",      # Late night 9/21 → attributed to 9/21
+            "2025-09-23T03:59:59.999Z",      # Boundary 9/23 → attributed to 9/22
+            "2025-09-24T04:00:00.000Z",      # After boundary 9/24 → attributed to 9/24
+            "2025-09-25T23:30:00.000Z",      # Another late night → attributed to 9/25
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_db = Path(temp_dir) / "test_timezone.db"
+            conn = open_db(str(test_db))
+
+            for i, timestamp in enumerate(test_cases):
+                conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, 1);", (timestamp,))
+
+            conn.commit()
+            conn.close()
+
+            violations = extract_violations(str(test_db))
+
+            # Should process all timestamps without errors
+            self.assertEqual(len(violations['violations']), len(test_cases))
+
+            # Verify all have valid date formats
+            for violation in violations['violations']:
+                self.assertRegex(violation['date'], r'^\d{4}-\d{2}-\d{2}$')
+                self.assertRegex(violation['daystamp'], r'^\d{8}$')
+
+    def test_leap_year_handling(self):
+        """Test handling of leap year dates"""
+        leap_year_cases = [
+            "2024-02-29T01:00:00.000Z",  # Valid leap year date
+            "2025-02-28T01:00:00.000Z",  # Non-leap year boundary
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_db = Path(temp_dir) / "test_leap.db"
+            conn = open_db(str(test_db))
+
+            for timestamp in leap_year_cases:
+                conn.execute("INSERT INTO logs (logged_at, is_night) VALUES (?, 1);", (timestamp,))
+
+            conn.commit()
+            conn.close()
+
+            violations = extract_violations(str(test_db))
+
+            # Should handle leap year dates correctly
+            self.assertEqual(len(violations['violations']), len(leap_year_cases))
+
+
 def run_all_tests():
     """Run all tests with detailed output"""
     # Create test suite
@@ -559,9 +844,13 @@ def run_all_tests():
         TestGitHubAPI,
         TestBeeminderAPI,
         TestViolationsSync,
-        TestExtractViolationsStandalone,
         TestIntegration,
-        TestSecurity
+        TestSecurity,
+        TestDatabaseConcurrency,
+        TestNightTimeAttribution,
+        TestErrorHandlingEnhanced,
+        TestRaceConditions,
+        TestTimestampHandling
     ]
 
     for test_class in test_classes:

@@ -92,6 +92,9 @@ def mark_posted_today(conn: sqlite3.Connection, ymd: str) -> None:
 def extract_violations(db_path: str) -> Dict:
     """Extract all violations from the database"""
     from pathlib import Path
+    import tempfile
+    import shutil
+    from datetime import datetime
 
     if not Path(db_path).exists():
         return {
@@ -102,29 +105,61 @@ def extract_violations(db_path: str) -> Dict:
             "unposted_violations": []
         }
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    cursor = conn.cursor()
+    # Work around WAL mode/permission issues by copying database to temp location
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as temp_db:
+            temp_path = temp_db.name
+
+        # Copy database to temp location
+        shutil.copy2(db_path, temp_path)
+
+        # Connect to the copy
+        conn = sqlite3.connect(temp_path)
+        cursor = conn.cursor()
+
+        # Verify the copy has the required tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='logs';")
+        if not cursor.fetchone():
+            raise Exception("Copied database missing required tables")
+
+        # Clean up temp file after we're done
+        temp_cleanup = temp_path
+    except Exception as e:
+        # Fallback to direct access if copy fails
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        cursor = conn.cursor()
+        temp_cleanup = None
 
     # Get all violations with their timestamps
+    # Apply night logger logic in SQL: 00:00-03:59 violations belong to previous day
     cursor.execute("""
         SELECT
-            DATE(logged_at) as date,
-            logged_at,
+            CASE
+                WHEN CAST(strftime('%H', logged_at) AS INTEGER) <= 3
+                THEN DATE(logged_at, '-1 day')
+                ELSE DATE(logged_at)
+            END as violation_date,
+            MIN(logged_at) as first_violation_timestamp,
             COUNT(*) as violation_count
         FROM logs
         WHERE is_night = 1
-        GROUP BY DATE(logged_at)
-        ORDER BY date DESC
+        GROUP BY
+            CASE
+                WHEN CAST(strftime('%H', logged_at) AS INTEGER) <= 3
+                THEN DATE(logged_at, '-1 day')
+                ELSE DATE(logged_at)
+            END
+        ORDER BY violation_date DESC
     """)
 
     violations = []
-    for date, first_violation_timestamp, count in cursor.fetchall():
+    for violation_date, first_violation_timestamp, count in cursor.fetchall():
         violations.append({
-            "date": date,
+            "date": violation_date,
             "timestamp": first_violation_timestamp,
             "value": 1,  # Beeminder value for violation
             "comment": f"Night logger violation ({count} detections)",
-            "daystamp": date.replace("-", "")  # Beeminder format: YYYYMMDD
+            "daystamp": violation_date.replace("-", "")  # Beeminder format: YYYYMMDD
         })
 
     # Check which dates have already been posted to avoid duplicates
@@ -136,6 +171,14 @@ def extract_violations(db_path: str) -> Dict:
         posted_dates = set()
 
     conn.close()
+
+    # Clean up temporary database file if we created one
+    if temp_cleanup:
+        try:
+            import os
+            os.unlink(temp_cleanup)
+        except:
+            pass
 
     result = {
         "violations": violations,
@@ -304,6 +347,9 @@ def main():
                 github_api = GitHubAPI(args.github_token, args.github_repo)
 
                 try:
+                    # Ensure database is fully synced before extraction
+                    conn.close()
+
                     # Upload violations data to GitHub
                     if args.verbose:
                         print(f"Generating and uploading violations data to GitHub...")
@@ -322,8 +368,10 @@ def main():
                         print("Failed to trigger GitHub Actions workflow", file=sys.stderr)
                         sys.exit(1)
 
-                    # Mark as posted locally
-                    mark_posted_today(conn, ymd)
+                    # Mark as posted locally - reopen connection
+                    temp_conn = open_db(args.db)
+                    mark_posted_today(temp_conn, ymd)
+                    temp_conn.close()
 
                     if args.verbose:
                         print(f"Triggered GitHub sync for date={ymd}. Exiting.")

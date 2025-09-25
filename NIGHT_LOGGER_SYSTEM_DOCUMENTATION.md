@@ -27,13 +27,14 @@ Local Computer (HSoT) → violations.json → GitHub → Beeminder (Display)
 ### 1. Local System (Deployed)
 
 #### Main Application
-- **File**: `/usr/local/bin/night_logger_github.py` (299 lines)
-- **Purpose**: Tamper-resistant logging application
+- **File**: `/usr/local/bin/night_logger_github.py` (299 lines) - **FIXED VERSION**
+- **Purpose**: Tamper-resistant logging application with continuous logging
 - **Features**:
   - Logs 1/0 values for night time detection (23:00-03:59)
   - Uploads database to GitHub on first night detection
   - Triggers GitHub Actions workflow
-  - Exits after triggering to prevent duplicate submissions
+  - **CONTINUES LOGGING** after upload (fixed premature exit bug)
+  - One-violation-per-day protection via `already_posted_today` guard
 
 #### Database Files
 - **Location**: `/var/lib/night-logger/`
@@ -139,13 +140,19 @@ CREATE TABLE posts (
 - `.github/workflows/sync-violations.yml` - GitHub Actions workflow
 
 ### Testing & Validation
-- `test_comprehensive.py` - Complete test suite (38 tests, 100% success rate)
+- `test_comprehensive.py` - Original test suite (38 tests)
   - Core functionality testing
   - GitHub/Beeminder API testing
   - System integration testing
   - Security and performance testing
   - Dual branch upload testing
   - Advanced sync features testing
+- `test_exit_logic_fix.py` - Exit logic fix tests (6 tests)
+  - Continuous logging after upload verification
+  - One-violation-per-day guarantee testing
+  - Database connection reopening tests
+  - Service lifetime comparison tests
+- `test_complete_with_fix.py` - Complete test suite (44 tests, 100% success rate)
 
 ### Documentation
 - `README.md` - Quick start guide and project overview
@@ -175,13 +182,14 @@ CREATE TABLE posts (
 
 ## Operation Flow
 
-### Daily Cycle
+### Daily Cycle (Fixed Behavior)
 1. **22:55 Daily**: Timer starts night-logger.service
 2. **23:00-03:59**: Service logs 1/0 values every 5 seconds to HSoT database
-3. **First "1" value**: Service generates violations.json from HSoT, uploads to both main and violations-data branches, triggers workflow, exits
-4. **GitHub Actions**: Downloads fresh violations.json from main branch, uses selective sync with Beeminder
-5. **04:05 Daily**: Timer stops any running service
-6. **12:00 PM NYC**: Scheduled sync ensures data integrity
+3. **First "1" value**: Service generates violations.json from HSoT, uploads to both main and violations-data branches, triggers workflow, **CONTINUES LOGGING**
+4. **Subsequent "1" values**: Service continues logging without re-uploading (protected by `already_posted_today`)
+5. **GitHub Actions**: Downloads fresh violations.json from main branch, uses selective sync with Beeminder
+6. **04:05 Daily**: Timer stops service (natural termination)
+7. **12:00 PM NYC**: Scheduled sync ensures data integrity
 
 ### Tamper Resistance
 - **Manual Beeminder Edits**: Selectively corrected by next sync
@@ -197,7 +205,7 @@ CREATE TABLE posts (
 - **Service**: Running as "Night Logger (Beeminder) - Tamper Resistant"
 - **Database**: 20+ violations tracked across multiple posted days
 - **Schedule**: Active timers for 22:55 start, 04:05 stop
-- **Testing**: 38 tests, 100% coverage
+- **Testing**: 44 tests (38 original + 6 exit logic fix), 100% coverage
 
 ### Data Statistics
 - **Total Violations**: 20+ violations tracked
@@ -216,8 +224,14 @@ nightlog status
 # View live service logs
 nightlog logs
 
-# Test complete system
+# Test complete system (44 tests including exit logic fix)
+python3 test_complete_with_fix.py
+
+# Test original system only (38 tests)
 python3 test_comprehensive.py
+
+# Test exit logic fix only (6 tests)
+python3 test_exit_logic_fix.py
 ```
 
 ### Manual Control
@@ -261,7 +275,7 @@ journalctl -u night-logger.service -n 20
 nightlog status
 
 # Run diagnostic tests
-python3 test_comprehensive.py
+python3 test_complete_with_fix.py
 ```
 
 ### File Locations Quick Reference
@@ -276,7 +290,11 @@ Local System:
 Repository:
 sync_violations.py                       # Sync program (selective)
 .github/workflows/sync-violations.yml    # GitHub Actions
-test_comprehensive.py                    # Test suite (38 tests)
+test_comprehensive.py                    # Original test suite (38 tests)
+test_exit_logic_fix.py                   # Exit logic fix tests (6 tests)
+test_complete_with_fix.py                # Complete test suite (44 tests)
+night_logger_github_fixed.py             # Fixed version with continuous logging
+deploy_fix.sh                            # Deployment script for fixed version
 violations.json                          # Current violations data
 ```
 

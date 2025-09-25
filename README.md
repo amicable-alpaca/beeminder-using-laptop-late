@@ -28,8 +28,14 @@ sudo nightlog fix-db
 
 ### Test Suite
 ```bash
-# Run comprehensive tests
+# Run comprehensive tests (44 tests total)
+python3 test_complete_with_fix.py
+
+# Run original tests only (38 tests)
 python3 test_comprehensive.py
+
+# Run exit logic fix tests only (6 tests)
+python3 test_exit_logic_fix.py
 ```
 
 ## What It Does
@@ -76,9 +82,12 @@ nightlog fix-db    # Fix database access issues
 
 ### Core Tamper-Resistant System
 - `night_logger_github.py` - Night logger (generates violations.json and uploads to GitHub)
+- `night_logger_github_fixed.py` - Fixed version with continuous logging behavior
 - `sync_violations.py` - GitHub Actions sync program with selective updates and Beeminder pagination
 - `.github/workflows/sync-violations.yml` - GitHub Actions workflow
-- `test_comprehensive.py` - Complete test suite (38 tests, 100% coverage)
+- `test_comprehensive.py` - Original test suite (38 tests)
+- `test_exit_logic_fix.py` - Exit logic fix tests (6 tests)
+- `test_complete_with_fix.py` - Complete test suite (44 tests, 100% coverage)
 
 ### Documentation & Setup
 - `SETUP_TAMPER_RESISTANT.md` - Complete deployment guide
@@ -100,7 +109,7 @@ nightlog status
 
 For any issues:
 ```bash
-python3 test_comprehensive.py
+python3 test_complete_with_fix.py
 ```
 
 ## Security & Configuration

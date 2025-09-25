@@ -61,11 +61,23 @@ Local Computer (HSoT) -> violations.json -> GitHub -> Beeminder (Display)
 
 ### 3. Testing & Verification
 
-1. **Test Complete System**:
+1. **Test Complete System (Including Exit Logic Fix)**:
+   ```bash
+   python3 test_complete_with_fix.py
+   ```
+   Expected: 44 tests, 100% success rate
+
+2. **Test Original System Only**:
    ```bash
    python3 test_comprehensive.py
    ```
    Expected: 38 tests, 100% success rate
+
+3. **Test Exit Logic Fix Only**:
+   ```bash
+   python3 test_exit_logic_fix.py
+   ```
+   Expected: 6 tests, 100% success rate
 
 2. **Check Local System Status**:
    ```bash
@@ -82,6 +94,59 @@ Local Computer (HSoT) -> violations.json -> GitHub -> Beeminder (Display)
    - Manually delete a Beeminder datapoint
    - Wait for next scheduled sync (12 PM NYC) or trigger manually
    - Datapoint should be automatically restored
+
+## Exit Logic Fix (September 2025)
+
+### Problem Identified
+The original night logger had a critical bug where it would exit immediately after uploading existing violations, missing subsequent night usage on the same night.
+
+**Original Broken Flow**:
+1. 22:55 - Service starts
+2. 23:00:01 - Detects first night usage, uploads violations, **exits immediately**
+3. 23:00:05+ - User continues using computer but service has exited (missed data!)
+
+### Fix Implemented
+**Fixed Flow**:
+1. 22:55 - Service starts
+2. 23:00:01 - Detects first night usage, uploads violations, **continues logging**
+3. 23:00:05+ - Service continues logging all night usage
+4. 04:05 - Service stopped by timer (natural termination)
+
+### Deployment Instructions
+
+1. **Deploy the Fix**:
+   ```bash
+   # Run the deployment script
+   ./deploy_fix.sh
+   ```
+
+   The script will:
+   - Stop the current service
+   - Backup the original file
+   - Install the fixed version
+   - Restart the service
+
+2. **Verify Fix Deployment**:
+   ```bash
+   # Check that fixed version is running
+   nightlog status
+
+   # Run comprehensive tests including exit logic fix
+   python3 test_complete_with_fix.py
+   ```
+
+3. **Monitor Next Night Session**:
+   - Wait for next night usage (23:00-03:59)
+   - Check logs: `nightlog logs`
+   - Verify multiple log entries are captured instead of just one
+   - Confirm violation is properly uploaded to Beeminder
+
+### Technical Changes Made
+- Removed premature `sys.exit(0)` after successful upload
+- Added proper database connection reopening after GitHub operations
+- Enhanced `already_posted_today` guard to prevent duplicate uploads
+- Maintained one-violation-per-day guarantee
+- Added 6 comprehensive tests to verify fix behavior
 
 ## How It Works
 
@@ -150,8 +215,12 @@ Local Computer (HSoT) -> violations.json -> GitHub -> Beeminder (Display)
 ## Files Overview
 
 - `night_logger_github.py`: Tamper-resistant night logger (generates violations.json and uploads to GitHub)
+- `night_logger_github_fixed.py`: Fixed version with continuous logging behavior
 - `sync_violations.py`: GitHub Actions sync program with selective updates and Beeminder pagination
 - `.github/workflows/sync-violations.yml`: GitHub Actions workflow
-- `test_comprehensive.py`: Complete test suite (38 tests, 100% coverage)
+- `test_comprehensive.py`: Original test suite (38 tests)
+- `test_exit_logic_fix.py`: Exit logic fix tests (6 tests)
+- `test_complete_with_fix.py`: Complete test suite (44 tests, 100% coverage)
+- `deploy_fix.sh`: Deployment script for exit logic fix
 - `.env.template`: Environment template for local setup
 - `SETUP_TAMPER_RESISTANT.md`: This setup guide

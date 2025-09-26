@@ -2,6 +2,8 @@
 
 Automatically track and report late-night computer usage (23:00-03:59) to Beeminder with **tamper-resistant architecture**.
 
+**Live Beeminder Goal**: https://www.beeminder.com/zarathustra/using-laptop-late
+
 ## 🔒 Tamper-Resistant Architecture
 
 **Flow**: `Local Computer (HSoT) → violations.json → GitHub → Beeminder`

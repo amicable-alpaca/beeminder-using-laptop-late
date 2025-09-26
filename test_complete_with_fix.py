@@ -50,7 +50,10 @@ def run_complete_test_suite():
         TestTimestampHandling,
         TestDualBranchUpload,
         TestAdvancedSyncFeatures,
-        TestExtractViolationsEnhanced
+        TestExtractViolationsEnhanced,
+        TestCleanBeeminderDuplicates,
+        TestMainFunction,
+        TestGitHubAPIEdgeCases
     ]
 
     # Exit logic fix test classes from test_exit_logic_fix.py

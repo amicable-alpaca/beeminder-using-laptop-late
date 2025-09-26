@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import the fixed module
 try:
-    from night_logger_github_fixed import (
+    from night_logger_github_fixed_v3 import (
         main, GitHubAPI, is_between_23_and_359_local, local_ymd, open_db,
         already_posted_today, mark_posted_today, extract_violations
     )
@@ -52,14 +52,14 @@ class TestFixedExitLogic(unittest.TestCase):
         call_log = []
 
         # Mock GitHub API to simulate successful upload
-        with patch('night_logger_github_fixed.GitHubAPI') as mock_github_class:
+        with patch('night_logger_github_fixed_v3.GitHubAPI') as mock_github_class:
             mock_github = MagicMock()
             mock_github.upload_violations_to_branch.return_value = True
             mock_github.trigger_workflow.return_value = True
             mock_github_class.return_value = mock_github
 
             # Mock sys.exit to prevent actual exit
-            with patch('night_logger_github_fixed.sys.exit') as mock_exit:
+            with patch('night_logger_github_fixed_v3.sys.exit') as mock_exit:
 
                 # Mock datetime.now to simulate night time sequence
                 test_times = [
@@ -69,12 +69,12 @@ class TestFixedExitLogic(unittest.TestCase):
                     datetime(2025, 9, 24, 23, 0, 15),  # 15 seconds later - should continue logging
                 ]
 
-                with patch('night_logger_github_fixed.datetime') as mock_datetime:
+                with patch('night_logger_github_fixed_v3.datetime') as mock_datetime:
                     mock_datetime.now.side_effect = test_times
                     mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
 
                     # Mock time.sleep to avoid actual delays
-                    with patch('night_logger_github_fixed.time.sleep') as mock_sleep:
+                    with patch('night_logger_github_fixed_v3.time.sleep') as mock_sleep:
 
                         # Mock environment variables
                         with patch.dict('os.environ', {
@@ -84,7 +84,7 @@ class TestFixedExitLogic(unittest.TestCase):
 
                             # Mock command line arguments
                             test_args = [
-                                'night_logger_github_fixed.py',
+                                'night_logger_github_fixed_v3.py',
                                 '--db', str(self.test_db),
                                 '--interval', '5',
                                 '--verbose'
@@ -126,12 +126,12 @@ class TestFixedExitLogic(unittest.TestCase):
 
         call_log = []
 
-        with patch('night_logger_github_fixed.GitHubAPI') as mock_github_class:
+        with patch('night_logger_github_fixed_v3.GitHubAPI') as mock_github_class:
             mock_github = MagicMock()
             mock_github_class.return_value = mock_github
 
             # Mock sys.exit to prevent actual exit
-            with patch('night_logger_github_fixed.sys.exit') as mock_exit:
+            with patch('night_logger_github_fixed_v3.sys.exit') as mock_exit:
 
                 # Mock datetime.now to simulate night time
                 test_times = [
@@ -140,11 +140,11 @@ class TestFixedExitLogic(unittest.TestCase):
                     datetime(2025, 9, 24, 23, 0, 10),  # Continue logging
                 ]
 
-                with patch('night_logger_github_fixed.datetime') as mock_datetime:
+                with patch('night_logger_github_fixed_v3.datetime') as mock_datetime:
                     mock_datetime.now.side_effect = test_times
                     mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
 
-                    with patch('night_logger_github_fixed.time.sleep') as mock_sleep:
+                    with patch('night_logger_github_fixed_v3.time.sleep') as mock_sleep:
 
                         def interrupt_after_calls(*args, **kwargs):
                             call_log.append('sleep_called')
@@ -154,7 +154,7 @@ class TestFixedExitLogic(unittest.TestCase):
                         mock_sleep.side_effect = interrupt_after_calls
 
                         test_args = [
-                            'night_logger_github_fixed.py',
+                            'night_logger_github_fixed_v3.py',
                             '--db', str(self.test_db),
                             '--interval', '5',
                             '--verbose'
@@ -179,7 +179,7 @@ class TestFixedExitLogic(unittest.TestCase):
     def test_database_connection_reopen_after_upload(self):
         """Test that database connection is properly reopened after upload"""
 
-        with patch('night_logger_github_fixed.GitHubAPI') as mock_github_class:
+        with patch('night_logger_github_fixed_v3.GitHubAPI') as mock_github_class:
             mock_github = MagicMock()
             mock_github.upload_violations_to_branch.return_value = True
             mock_github.trigger_workflow.return_value = True
@@ -194,19 +194,19 @@ class TestFixedExitLogic(unittest.TestCase):
                 db_operations.append(f'open_db({path})')
                 return original_open_db(path)
 
-            with patch('night_logger_github_fixed.open_db', side_effect=track_open_db):
-                with patch('night_logger_github_fixed.sys.exit') as mock_exit:
+            with patch('night_logger_github_fixed_v3.open_db', side_effect=track_open_db):
+                with patch('night_logger_github_fixed_v3.sys.exit') as mock_exit:
 
                     test_times = [
                         datetime(2025, 9, 24, 23, 0, 0),   # First night detection
                         datetime(2025, 9, 24, 23, 0, 5),   # Continue logging
                     ]
 
-                    with patch('night_logger_github_fixed.datetime') as mock_datetime:
+                    with patch('night_logger_github_fixed_v3.datetime') as mock_datetime:
                         mock_datetime.now.side_effect = test_times
                         mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
 
-                        with patch('night_logger_github_fixed.time.sleep') as mock_sleep:
+                        with patch('night_logger_github_fixed_v3.time.sleep') as mock_sleep:
                             mock_sleep.side_effect = [None, KeyboardInterrupt("Test end")]
 
                             with patch.dict('os.environ', {
@@ -215,7 +215,7 @@ class TestFixedExitLogic(unittest.TestCase):
                             }):
 
                                 test_args = [
-                                    'night_logger_github_fixed.py',
+                                    'night_logger_github_fixed_v3.py',
                                     '--db', str(self.test_db),
                                     '--interval', '5'
                                 ]
@@ -238,7 +238,7 @@ class TestFixedExitLogic(unittest.TestCase):
 
         upload_calls = []
 
-        with patch('night_logger_github_fixed.GitHubAPI') as mock_github_class:
+        with patch('night_logger_github_fixed_v3.GitHubAPI') as mock_github_class:
             mock_github = MagicMock()
 
             def track_upload(*args, **kwargs):
@@ -249,7 +249,7 @@ class TestFixedExitLogic(unittest.TestCase):
             mock_github.trigger_workflow.return_value = True
             mock_github_class.return_value = mock_github
 
-            with patch('night_logger_github_fixed.sys.exit') as mock_exit:
+            with patch('night_logger_github_fixed_v3.sys.exit') as mock_exit:
 
                 # Simulate multiple night detections on same day
                 test_times = [
@@ -259,7 +259,7 @@ class TestFixedExitLogic(unittest.TestCase):
                     datetime(2025, 9, 24, 23, 0, 15),  # Fourth detection - should NOT upload
                 ]
 
-                with patch('night_logger_github_fixed.datetime') as mock_datetime:
+                with patch('night_logger_github_fixed_v3.datetime') as mock_datetime:
                     mock_datetime.now.side_effect = test_times
                     mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
 
@@ -270,14 +270,14 @@ class TestFixedExitLogic(unittest.TestCase):
                         if call_count >= 4:
                             raise KeyboardInterrupt("Test end")
 
-                    with patch('night_logger_github_fixed.time.sleep', side_effect=limited_sleep):
+                    with patch('night_logger_github_fixed_v3.time.sleep', side_effect=limited_sleep):
                         with patch.dict('os.environ', {
                             'GITHUB_TOKEN': 'test_token',
                             'GITHUB_REPO': 'test/repo'
                         }):
 
                             test_args = [
-                                'night_logger_github_fixed.py',
+                                'night_logger_github_fixed_v3.py',
                                 '--db', str(self.test_db),
                                 '--interval', '5'
                             ]
@@ -317,13 +317,13 @@ class TestFixedBehaviorVsOriginal(unittest.TestCase):
         # Fixed behavior: Multiple log entries before test interruption
         fixed_log_entries = []
 
-        with patch('night_logger_github_fixed.GitHubAPI') as mock_github_class:
+        with patch('night_logger_github_fixed_v3.GitHubAPI') as mock_github_class:
             mock_github = MagicMock()
             mock_github.upload_violations_to_branch.return_value = True
             mock_github.trigger_workflow.return_value = True
             mock_github_class.return_value = mock_github
 
-            with patch('night_logger_github_fixed.sys.exit') as mock_exit:
+            with patch('night_logger_github_fixed_v3.sys.exit') as mock_exit:
 
                 # Mock INSERT operations to track logging
                 original_execute = None
@@ -336,7 +336,7 @@ class TestFixedBehaviorVsOriginal(unittest.TestCase):
                 # Night time for multiple detections
                 test_times = [datetime(2025, 9, 24, 23, 0, min(i * 5, 59)) for i in range(10)]
 
-                with patch('night_logger_github_fixed.datetime') as mock_datetime:
+                with patch('night_logger_github_fixed_v3.datetime') as mock_datetime:
                     mock_datetime.now.side_effect = test_times
                     mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
 
@@ -347,14 +347,14 @@ class TestFixedBehaviorVsOriginal(unittest.TestCase):
                         if call_count >= 5:  # Stop after 5 iterations
                             raise KeyboardInterrupt("Test end")
 
-                    with patch('night_logger_github_fixed.time.sleep', side_effect=limited_sleep):
+                    with patch('night_logger_github_fixed_v3.time.sleep', side_effect=limited_sleep):
                         with patch.dict('os.environ', {
                             'GITHUB_TOKEN': 'test_token',
                             'GITHUB_REPO': 'test/repo'
                         }):
 
                             test_args = [
-                                'night_logger_github_fixed.py',
+                                'night_logger_github_fixed_v3.py',
                                 '--db', str(self.test_db),
                                 '--interval', '5'
                             ]
@@ -386,13 +386,13 @@ class TestFixedBehaviorVsOriginal(unittest.TestCase):
             'total_iterations': 0
         }
 
-        with patch('night_logger_github_fixed.GitHubAPI') as mock_github_class:
+        with patch('night_logger_github_fixed_v3.GitHubAPI') as mock_github_class:
             mock_github = MagicMock()
             mock_github.upload_violations_to_branch.return_value = True
             mock_github.trigger_workflow.return_value = True
             mock_github_class.return_value = mock_github
 
-            with patch('night_logger_github_fixed.sys.exit') as mock_exit:
+            with patch('night_logger_github_fixed_v3.sys.exit') as mock_exit:
 
                 # Track service lifetime
                 def track_iterations(*args, **kwargs):
@@ -409,18 +409,18 @@ class TestFixedBehaviorVsOriginal(unittest.TestCase):
                 # Night time sequence
                 test_times = [datetime(2025, 9, 24, 23, i // 12, (i * 5) % 60) for i in range(15)]
 
-                with patch('night_logger_github_fixed.datetime') as mock_datetime:
+                with patch('night_logger_github_fixed_v3.datetime') as mock_datetime:
                     mock_datetime.now.side_effect = test_times
                     mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
 
-                    with patch('night_logger_github_fixed.time.sleep', side_effect=track_iterations):
+                    with patch('night_logger_github_fixed_v3.time.sleep', side_effect=track_iterations):
                         with patch.dict('os.environ', {
                             'GITHUB_TOKEN': 'test_token',
                             'GITHUB_REPO': 'test/repo'
                         }):
 
                             test_args = [
-                                'night_logger_github_fixed.py',
+                                'night_logger_github_fixed_v3.py',
                                 '--db', str(self.test_db),
                                 '--interval', '5'
                             ]

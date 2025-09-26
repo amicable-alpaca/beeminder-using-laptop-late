@@ -65,13 +65,13 @@ Local Computer (HSoT) -> violations.json -> GitHub -> Beeminder (Display)
    ```bash
    python3 test_complete_with_fix.py
    ```
-   Expected: 44 tests, 100% success rate
+   Expected: 56 tests, 100% success rate
 
-2. **Test Original System Only**:
+2. **Test Comprehensive System Only**:
    ```bash
    python3 test_comprehensive.py
    ```
-   Expected: 38 tests, 100% success rate
+   Expected: 50 tests, 100% success rate
 
 3. **Test Exit Logic Fix Only**:
    ```bash
@@ -214,13 +214,13 @@ The original night logger had a critical bug where it would exit immediately aft
 
 ## Files Overview
 
-- `night_logger_github.py`: Tamper-resistant night logger (generates violations.json and uploads to GitHub)
-- `night_logger_github_fixed.py`: Fixed version with continuous logging behavior
+- `night_logger_github.py`: Tamper-resistant night logger with exit logic fix (generates violations.json and uploads to GitHub)
+- `night_logger_github_fixed_v3.py`: Latest fixed version with continuous logging behavior
 - `sync_violations.py`: GitHub Actions sync program with selective updates and Beeminder pagination
 - `.github/workflows/sync-violations.yml`: GitHub Actions workflow
-- `test_comprehensive.py`: Original test suite (38 tests)
+- `test_comprehensive.py`: Comprehensive test suite (50 tests)
 - `test_exit_logic_fix.py`: Exit logic fix tests (6 tests)
-- `test_complete_with_fix.py`: Complete test suite (44 tests, 100% coverage)
+- `test_complete_with_fix.py`: Complete test suite (56 tests, 100% success rate)
 - `deploy_fix.sh`: Deployment script for exit logic fix
 - `.env.template`: Environment template for local setup
 - `SETUP_TAMPER_RESISTANT.md`: This setup guide

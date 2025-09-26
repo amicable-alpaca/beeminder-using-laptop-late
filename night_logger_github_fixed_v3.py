@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-night_logger_github.py - Tamper-Resistant Version
+night_logger_github.py - Tamper-Resistant Version with Fixed extract_violations and Deduplication
+
+FIXED:
+1. extract_violations now uses posts table as authoritative source
+2. Added deduplication logic to clean up Beeminder before uploading
+3. Ensures violations.json matches HSoT database exactly
 
 What it does
 ------------
@@ -35,6 +40,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import requests  # apt: python3-requests
+from collections import defaultdict
 
 DB_PATH = "night_logs.db"
 
@@ -89,8 +95,61 @@ def mark_posted_today(conn: sqlite3.Connection, ymd: str) -> None:
     conn.commit()
 
 
+def clean_beeminder_duplicates(username: str, auth_token: str, goal_slug: str, verbose: bool = False) -> bool:
+    """Remove duplicate datapoints from Beeminder, keeping the most recent one for each date"""
+    try:
+        # Get all datapoints
+        url = f"https://www.beeminder.com/api/v1/users/{username}/goals/{goal_slug}/datapoints.json"
+        params = {'auth_token': auth_token, 'sort': 'daystamp'}
+
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        datapoints = response.json()
+
+        # Group by date
+        by_date = defaultdict(list)
+        for dp in datapoints:
+            by_date[dp['daystamp']].append(dp)
+
+        # Find duplicates
+        duplicates_removed = 0
+        for date, dps in by_date.items():
+            if len(dps) > 1:
+                # Sort by ID (most recent first) and keep the first one
+                dps_sorted = sorted(dps, key=lambda x: x['id'], reverse=True)
+                keep = dps_sorted[0]
+                remove = dps_sorted[1:]
+
+                if verbose:
+                    print(f"🗑️  Found {len(dps)} datapoints for {date}, keeping ID {keep['id']}, removing {len(remove)} duplicates")
+
+                # Remove duplicates
+                for dp in remove:
+                    delete_url = f"https://www.beeminder.com/api/v1/users/{username}/goals/{goal_slug}/datapoints/{dp['id']}.json"
+                    delete_params = {'auth_token': auth_token}
+
+                    delete_response = requests.delete(delete_url, params=delete_params, timeout=30)
+                    if delete_response.status_code == 200:
+                        duplicates_removed += 1
+                        if verbose:
+                            print(f"  ✅ Removed duplicate datapoint {dp['id']} for {date}")
+                    else:
+                        if verbose:
+                            print(f"  ❌ Failed to remove datapoint {dp['id']} for {date}: {delete_response.status_code}")
+
+        if verbose:
+            print(f"🧹 Cleaned {duplicates_removed} duplicate datapoints from Beeminder")
+
+        return True
+
+    except requests.exceptions.RequestException as e:
+        if verbose:
+            print(f"❌ Failed to clean duplicates: {e}")
+        return False
+
+
 def extract_violations(db_path: str) -> Dict:
-    """Extract all violations from the database"""
+    """Extract all violations from the database using posts table as authoritative source"""
     from pathlib import Path
     import tempfile
     import shutil
@@ -124,48 +183,40 @@ def extract_violations(db_path: str) -> Dict:
         cursor = conn.cursor()
         temp_cleanup = None
 
-    # Get all violations with their timestamps
-    cursor.execute("""
-        SELECT
-            DATE(logged_at) as calendar_date,
-            strftime('%H', logged_at) as hour,
-            logged_at,
-            COUNT(*) as violation_count
-        FROM logs
-        WHERE is_night = 1
-        GROUP BY DATE(logged_at)
-        ORDER BY DATE(logged_at) DESC
-    """)
-
-    violations = []
-    for calendar_date, hour, first_violation_timestamp, count in cursor.fetchall():
-        # Apply night logger logic: 00:00-03:59 violations belong to previous day
-        from datetime import datetime, timedelta
-        dt = datetime.fromisoformat(calendar_date)
-        first_hour = int(hour)
-
-        if first_hour <= 3:
-            # Violation at 00:00-03:59 belongs to previous day
-            violation_date = (dt - timedelta(days=1)).strftime('%Y-%m-%d')
-        else:
-            # Violation at 04:00-23:59 belongs to same day
-            violation_date = calendar_date
-
-        violations.append({
-            "date": violation_date,
-            "timestamp": first_violation_timestamp,
-            "value": 1,  # Beeminder value for violation
-            "comment": f"Night logger violation ({count} detections)",
-            "daystamp": violation_date.replace("-", "")  # Beeminder format: YYYYMMDD
-        })
-
-    # Check which dates have already been posted to avoid duplicates
+    # Use posts table as the authoritative source - it knows which dates were posted
     try:
         cursor.execute("SELECT ymd FROM posts ORDER BY ymd")
-        posted_dates = {row[0] for row in cursor.fetchall()}
+        posted_dates = [row[0] for row in cursor.fetchall()]
     except sqlite3.OperationalError:
         # If posts table doesn't exist or is inaccessible, assume no posted dates
-        posted_dates = set()
+        posted_dates = []
+
+    violations = []
+    # For each posted date, get violation data from logs
+    for date_str in posted_dates:
+        # Get violations for this specific date using the same logic as the main loop
+        cursor.execute("""
+            SELECT COUNT(*) as detections, MIN(logged_at) as first_detection
+            FROM logs
+            WHERE is_night = 1
+            AND (
+                (strftime('%H', logged_at) <= '03' AND date(logged_at, '-1 day') = ?)
+                OR (strftime('%H', logged_at) > '03' AND date(logged_at) = ?)
+            )
+        """, (date_str, date_str))
+
+        row = cursor.fetchone()
+        if row and row[0] > 0:
+            detections = row[0]
+            first_detection = row[1]
+
+            violations.append({
+                "date": date_str,
+                "timestamp": first_detection,
+                "value": 1,  # Beeminder value for violation
+                "comment": f"Night logger violation ({detections} detections)",
+                "daystamp": date_str.replace("-", "")  # Beeminder format: YYYYMMDD
+            })
 
     conn.close()
 
@@ -179,10 +230,10 @@ def extract_violations(db_path: str) -> Dict:
 
     result = {
         "violations": violations,
-        "posted_dates": list(posted_dates),
+        "posted_dates": posted_dates,
         "last_updated": datetime.utcnow().isoformat() + "Z",
         "total_violations": len(violations),
-        "unposted_violations": [v for v in violations if v["date"] not in posted_dates]
+        "unposted_violations": []  # All violations in this function are posted by definition
     }
 
     return result
@@ -203,9 +254,22 @@ class GitHubAPI:
             "User-Agent": "night-logger-github/1.0"
         }
 
-    def upload_violations_to_branch(self, db_path: str, branch: str = "violations-data") -> bool:
+    def upload_violations_to_branch(self, db_path: str, branch: str = "violations-data", clean_duplicates: bool = True) -> bool:
         """Generate violations.json from database and upload to a specific branch"""
         try:
+            # Clean Beeminder duplicates first (optional)
+            if clean_duplicates:
+                # Get Beeminder credentials from environment
+                username = os.getenv('BEEMINDER_USERNAME')
+                auth_token = os.getenv('BEEMINDER_AUTH_TOKEN')
+                goal_slug = os.getenv('BEEMINDER_GOAL_SLUG')
+
+                if username and auth_token and goal_slug:
+                    print("🧹 Cleaning Beeminder duplicates before upload...")
+                    clean_beeminder_duplicates(username, auth_token, goal_slug, verbose=True)
+                else:
+                    print("ℹ️  Skipping duplicate cleanup - Beeminder credentials not available")
+
             # Extract violations from the HSoT database
             violations_data = extract_violations(db_path)
 
@@ -347,11 +411,11 @@ def main():
                         # Ensure database is fully synced before extraction
                         conn.close()
 
-                        # Upload violations data to GitHub
+                        # Upload violations data to GitHub with deduplication
                         if args.verbose:
                             print(f"Generating and uploading violations data to GitHub...")
 
-                        upload_success = github_api.upload_violations_to_branch(args.db)
+                        upload_success = github_api.upload_violations_to_branch(args.db, clean_duplicates=True)
                         if not upload_success:
                             print("Failed to upload violations data to GitHub", file=sys.stderr)
                             sys.exit(1)
@@ -387,11 +451,11 @@ def main():
 
     except KeyboardInterrupt:
         if args.verbose:
-            print("\nStopping. Goodbye!")
+            print("\nStopped by user.")
     finally:
-        try:
+        if cursor:
             cursor.close()
-        finally:
+        if conn:
             conn.close()
 
 

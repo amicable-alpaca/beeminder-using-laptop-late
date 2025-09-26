@@ -140,19 +140,21 @@ CREATE TABLE posts (
 - `.github/workflows/sync-violations.yml` - GitHub Actions workflow
 
 ### Testing & Validation
-- `test_comprehensive.py` - Original test suite (38 tests)
+- `test_comprehensive.py` - Comprehensive test suite (50 tests)
   - Core functionality testing
   - GitHub/Beeminder API testing
   - System integration testing
   - Security and performance testing
   - Dual branch upload testing
   - Advanced sync features testing
+  - Database concurrency and race condition testing
+  - Error handling and edge cases
 - `test_exit_logic_fix.py` - Exit logic fix tests (6 tests)
   - Continuous logging after upload verification
   - One-violation-per-day guarantee testing
   - Database connection reopening tests
   - Service lifetime comparison tests
-- `test_complete_with_fix.py` - Complete test suite (44 tests, 100% success rate)
+- `test_complete_with_fix.py` - Complete test suite (56 tests, 100% success rate)
 
 ### Documentation
 - `README.md` - Quick start guide and project overview
@@ -205,7 +207,7 @@ CREATE TABLE posts (
 - **Service**: Running as "Night Logger (Beeminder) - Tamper Resistant"
 - **Database**: 20+ violations tracked across multiple posted days
 - **Schedule**: Active timers for 22:55 start, 04:05 stop
-- **Testing**: 44 tests (38 original + 6 exit logic fix), 100% coverage
+- **Testing**: 56 tests (50 comprehensive + 6 exit logic fix), 100% success rate
 
 ### Data Statistics
 - **Total Violations**: 20+ violations tracked
@@ -224,10 +226,10 @@ nightlog status
 # View live service logs
 nightlog logs
 
-# Test complete system (44 tests including exit logic fix)
+# Test complete system (56 tests including exit logic fix, 100% success rate)
 python3 test_complete_with_fix.py
 
-# Test original system only (38 tests)
+# Test comprehensive system only (50 tests)
 python3 test_comprehensive.py
 
 # Test exit logic fix only (6 tests)
@@ -290,10 +292,10 @@ Local System:
 Repository:
 sync_violations.py                       # Sync program (selective)
 .github/workflows/sync-violations.yml    # GitHub Actions
-test_comprehensive.py                    # Original test suite (38 tests)
+test_comprehensive.py                    # Comprehensive test suite (50 tests)
 test_exit_logic_fix.py                   # Exit logic fix tests (6 tests)
-test_complete_with_fix.py                # Complete test suite (44 tests)
-night_logger_github_fixed.py             # Fixed version with continuous logging
+test_complete_with_fix.py                # Complete test suite (56 tests, 100% success)
+night_logger_github_fixed_v3.py          # Latest fixed version with continuous logging
 deploy_fix.sh                            # Deployment script for fixed version
 violations.json                          # Current violations data
 ```

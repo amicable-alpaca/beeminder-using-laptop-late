@@ -45,3 +45,13 @@ __pycache__/
 venv/
 env/
 ENV/
+
+# Deployment and backup files
+deploy_*.sh
+*.backup
+*.backup.*
+
+# Test artifacts and temporary files
+test_results.txt
+violations_*.json
+temp_*

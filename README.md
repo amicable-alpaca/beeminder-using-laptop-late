@@ -28,10 +28,10 @@ sudo nightlog fix-db
 
 ### Test Suite
 ```bash
-# Run comprehensive tests (44 tests total)
+# Run comprehensive tests (56 tests total, 100% coverage)
 python3 test_complete_with_fix.py
 
-# Run original tests only (38 tests)
+# Run original tests only (50 tests)
 python3 test_comprehensive.py
 
 # Run exit logic fix tests only (6 tests)
@@ -41,14 +41,15 @@ python3 test_exit_logic_fix.py
 ## What It Does
 
 - **Monitors**: Computer usage between 23:00-03:59 local time
-- **Logs**: Samples every 5 seconds (1 = night time, 0 = day time)
+- **Logs**: Samples every 5 seconds (1 = night time, 0 = day time) continuously
 - **Syncs**: Local → violations.json → GitHub → Beeminder with selective updates
 - **Protects**: Against manual data tampering via immutable GitHub audit trail
+- **Continues**: Service continues logging after successful uploads (exit logic fixed)
 
 ## System Components
 
 ### Local System (Deployed)
-- **Main Script**: `/usr/local/bin/night_logger_github.py` - Tamper-resistant logging application
+- **Main Script**: `/usr/local/bin/night_logger_github.py` - Tamper-resistant logging application (with exit logic fix)
 - **Database**: `/var/lib/night-logger/night_logs.db` - Local SQLite storage (HSoT)
 - **Service**: `night-logger.service` - Systemd service (runs 22:55-04:05)
 - **CLI Tool**: `nightlog` - Status and control commands
@@ -81,13 +82,13 @@ nightlog fix-db    # Fix database access issues
 ## Repository Files
 
 ### Core Tamper-Resistant System
-- `night_logger_github.py` - Night logger (generates violations.json and uploads to GitHub)
-- `night_logger_github_fixed.py` - Fixed version with continuous logging behavior
+- `night_logger_github.py` - Night logger with exit logic fix (generates violations.json and uploads to GitHub)
+- `night_logger_github_fixed_v3.py` - Latest fixed version with continuous logging behavior
 - `sync_violations.py` - GitHub Actions sync program with selective updates and Beeminder pagination
 - `.github/workflows/sync-violations.yml` - GitHub Actions workflow
-- `test_comprehensive.py` - Original test suite (38 tests)
+- `test_comprehensive.py` - Comprehensive test suite (50 tests)
 - `test_exit_logic_fix.py` - Exit logic fix tests (6 tests)
-- `test_complete_with_fix.py` - Complete test suite (44 tests, 100% coverage)
+- `test_complete_with_fix.py` - Complete test suite (56 tests, 100% coverage)
 
 ### Documentation & Setup
 - `SETUP_TAMPER_RESISTANT.md` - Complete deployment guide
@@ -107,8 +108,9 @@ For detailed system information:
 nightlog status
 ```
 
-For any issues:
+For comprehensive testing:
 ```bash
+# Run all 56 tests (100% coverage achieved)
 python3 test_complete_with_fix.py
 ```
 

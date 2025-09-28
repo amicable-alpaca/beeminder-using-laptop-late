@@ -411,6 +411,11 @@ def main():
                         # Ensure database is fully synced before extraction
                         conn.close()
 
+                        # Mark as posted locally FIRST so extract_violations includes this date
+                        temp_conn = open_db(args.db)
+                        mark_posted_today(temp_conn, ymd)
+                        temp_conn.close()
+
                         # Upload violations data to GitHub with deduplication
                         if args.verbose:
                             print(f"Generating and uploading violations data to GitHub...")
@@ -428,11 +433,6 @@ def main():
                         if not trigger_success:
                             print("Failed to trigger GitHub Actions workflow", file=sys.stderr)
                             sys.exit(1)
-
-                        # Mark as posted locally - reopen connection
-                        temp_conn = open_db(args.db)
-                        mark_posted_today(temp_conn, ymd)
-                        temp_conn.close()
 
                         # Reopen main connection to continue logging
                         conn = open_db(args.db)

@@ -54,4 +54,5 @@ deploy_*.sh
 # Test artifacts and temporary files
 test_results.txt
 violations_*.json
+!violations.json
 temp_*

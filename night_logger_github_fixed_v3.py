@@ -254,7 +254,7 @@ class GitHubAPI:
             "User-Agent": "night-logger-github/1.0"
         }
 
-    def upload_violations_to_branch(self, db_path: str, branch: str = "violations-data", clean_duplicates: bool = True) -> bool:
+    def upload_violations_to_branch(self, db_path: str, branch: str = "main", clean_duplicates: bool = True) -> bool:
         """Generate violations.json from database and upload to a specific branch"""
         try:
             # Clean Beeminder duplicates first (optional)

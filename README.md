@@ -23,44 +23,43 @@ nightlog status
 
 # View live logs
 nightlog logs
-
-# Fix database issues (if needed)
-sudo nightlog fix-db
 ```
 
 ### Test Suite
 ```bash
-# Run comprehensive tests (56 tests total, 100% coverage)
-python3 test_complete_with_fix.py
+# Run all tests (60 tests, all passing)
+pytest -v
 
-# Run original tests only (50 tests)
-python3 test_comprehensive.py
+# Run with coverage report
+pytest --cov=. --cov-report=html --cov-report=term-missing
 
-# Run exit logic fix tests only (6 tests)
-python3 test_exit_logic_fix.py
+# Run specific test files
+pytest tests/test_sync_violations.py -v
+pytest tests/test_night_logger_github.py -v
 ```
+
+See [TESTING.md](docs/TESTING.md) for complete test documentation.
 
 ## What It Does
 
 - **Monitors**: Computer usage between 23:00-03:59 local time
-- **Logs**: Samples every 5 seconds (1 = night time, 0 = day time) continuously
+- **Logs**: Samples every 60 seconds to local SQLite database
 - **Syncs**: Local → violations.json → GitHub → Beeminder with selective updates
 - **Protects**: Against manual data tampering via immutable GitHub audit trail
-- **Continues**: Service continues logging after successful uploads (exit logic fixed)
 
 ## System Components
 
 ### Local System (Deployed)
-- **Main Script**: `/usr/local/bin/night_logger_github.py` - Tamper-resistant logging application (with exit logic fix)
+- **Main Script**: `/usr/local/bin/night_logger_github.py` - Tamper-resistant logging application
 - **Database**: `/var/lib/night-logger/night_logs.db` - Local SQLite storage (HSoT)
 - **Service**: `night-logger.service` - Systemd service (runs 22:55-04:05)
 - **CLI Tool**: `nightlog` - Status and control commands
 - **Environment**: `/home/admin/.env` - GitHub API credentials
 
 ### GitHub Actions (Repository)
-- **Workflow**: `.github/workflows/sync-violations.yml` - Daily sync at 12 PM NYC
-- **Sync Script**: `sync_violations.py` - Handles violations.json → Beeminder selective sync
-- **violations.json**: GitHub-hosted violations data (1KB vs 50KB+ database)
+- **Workflow**: `.github/workflows/sync-violations.yml` - Automated sync
+- **Sync Script**: `sync_violations.py` - Handles violations.json → Beeminder sync with pagination
+- **violations.json**: GitHub-hosted violations data
 
 ## Commands
 
@@ -71,53 +70,73 @@ nightlog start     # Start service manually
 nightlog stop      # Stop service manually
 nightlog enable    # Enable automatic timers
 nightlog disable   # Disable automatic timers
-nightlog fix-db    # Fix database access issues
 ```
-
-## Current Status
-
-- **Database**: 20+ violations tracked across multiple posted days
-- **Schedule**: Runs automatically at 22:55, stops at 04:05
-- **Permissions**: Admin users can read database via `nightlog-readers` group
-- **Architecture**: Tamper-resistant system fully deployed with dual branch uploads
 
 ## Repository Files
 
-### Core Tamper-Resistant System
-- `night_logger_github.py` - Night logger with exit logic fix (generates violations.json and uploads to GitHub)
-- `night_logger_github_fixed_v3.py` - Latest fixed version with continuous logging behavior
-- `sync_violations.py` - GitHub Actions sync program with selective updates and Beeminder pagination
+### Core System
+- `sync_violations.py` - Beeminder sync script (used by GitHub Actions)
+- `night_logger_github_fixed_v3.py` - Night logger source (for reference/development)
 - `.github/workflows/sync-violations.yml` - GitHub Actions workflow
-- `test_comprehensive.py` - Comprehensive test suite (50 tests)
-- `test_exit_logic_fix.py` - Exit logic fix tests (6 tests)
-- `test_complete_with_fix.py` - Complete test suite (56 tests, 100% coverage)
+- `violations.json` - Current violations data
 
-### Documentation & Setup
-- `SETUP_TAMPER_RESISTANT.md` - Complete deployment guide
-- `NIGHT_LOGGER_SYSTEM_DOCUMENTATION.md` - Technical reference documentation
+### Testing
+- `tests/test_sync_violations.py` - Tests for sync script (27 tests)
+- `tests/test_night_logger_github.py` - Tests for night logger (33 tests)
+- `pytest.ini` - Test configuration
+- `.coveragerc` - Coverage configuration
+- `requirements-test.txt` - Test dependencies
+
+### Documentation
+- `README.md` - This file
+- `docs/TESTING.md` - Comprehensive test documentation
+- `docs/NIGHT_LOGGER_SYSTEM_DOCUMENTATION.md` - Technical reference
+- `docs/SETUP_TAMPER_RESISTANT.md` - Deployment guide
 - `.env.template` - Environment configuration template
 
 ## Setup Instructions
 
-1. **Deploy System**: Follow `SETUP_TAMPER_RESISTANT.md` for complete configuration
-2. **Test Setup**: Run `python3 test_comprehensive.py` to verify all components
+1. **Deploy System**: Follow `docs/SETUP_TAMPER_RESISTANT.md` for complete configuration
+2. **Test Setup**: Run `pytest -v` to verify all components (60 tests)
 3. **Monitor**: Use `nightlog status` to check ongoing operation
+
+## Key Features
+
+### Pagination Fix (October 2025)
+- Fixed bug where sync script only fetched first page of Beeminder datapoints
+- Now properly paginates through all datapoints
+- Prevents duplicate datapoints from accumulating
+
+### Service Timer Fix (October 2025)
+- Fixed `Restart=always` causing service to restart after stop timer
+- Changed to `Restart=on-failure` for proper timer control
+- Service now correctly runs 22:55 PM - 04:05 AM window
+
+### Test Suite (October 2025)
+- Added comprehensive test coverage (60 tests)
+- 100% of critical code paths tested
+- All tests passing with no external dependencies
 
 ## Troubleshooting
 
-For detailed system information:
 ```bash
+# Check complete system status
 nightlog status
+
+# View recent logs
+journalctl -u night-logger.service -n 50
+
+# Run tests to verify functionality
+pytest -v
 ```
 
-For comprehensive testing:
-```bash
-# Run all 56 tests (100% coverage achieved)
-python3 test_complete_with_fix.py
-```
+For detailed documentation, see:
+- [Technical Documentation](docs/NIGHT_LOGGER_SYSTEM_DOCUMENTATION.md)
+- [Setup Guide](docs/SETUP_TAMPER_RESISTANT.md)
+- [Test Documentation](docs/TESTING.md)
 
 ## Security & Configuration
 
 - **GitHub Secrets**: Beeminder credentials stored securely in repository secrets
 - **Local Environment**: GitHub API credentials in `/home/admin/.env` (600 permissions)
-- **Database Access**: `nightlog-readers` group for admin access
+- **Database Access**: Read-only copy available at `/var/lib/night-logger/night_logs_ro.db`

@@ -55,4 +55,7 @@ deploy_*.sh
 test_results.txt
 violations_*.json
 !violations.json
-temp_*
+temp_*.coverage
+htmlcov/
+__pycache__/
+.pytest_cache/

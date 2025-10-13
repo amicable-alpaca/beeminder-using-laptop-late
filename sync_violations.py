@@ -25,7 +25,7 @@ class BeeminderAPI:
         """Get all datapoints for a specific goal with pagination support"""
         all_datapoints = []
         page = 1
-        per_page = 300  # Maximum allowed by Beeminder API
+        per_page = 300  # Request max, but API may return less
 
         while True:
             url = f"{self.base_url}/users/{self.username}/goals/{goal_slug}/datapoints.json"
@@ -45,13 +45,9 @@ class BeeminderAPI:
                     break
 
                 all_datapoints.extend(page_data)
-
-                # If we got less than per_page, we're done
-                if len(page_data) < per_page:
-                    break
+                print(f"📄 Fetched page {page} for {goal_slug}: {len(page_data)} datapoints")
 
                 page += 1
-                print(f"📄 Fetched page {page-1} for {goal_slug}: {len(page_data)} datapoints")
 
             except requests.exceptions.RequestException as e:
                 print(f"❌ Error fetching goal data for {goal_slug} (page {page}): {e}")

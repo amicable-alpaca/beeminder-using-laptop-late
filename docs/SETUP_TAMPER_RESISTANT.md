@@ -61,31 +61,25 @@ Local Computer (HSoT) -> violations.json -> GitHub -> Beeminder (Display)
 
 ### 3. Testing & Verification
 
-1. **Test Complete System (Including Exit Logic Fix)**:
+1. **Run All Tests**:
    ```bash
-   python3 test_complete_with_fix.py
+   pytest -v
    ```
-   Expected: 56 tests, 100% success rate
+   Expected: 60 tests, all passing
 
-2. **Test Comprehensive System Only**:
+2. **Run Tests with Coverage**:
    ```bash
-   python3 test_comprehensive.py
+   pytest --cov=. --cov-report=html --cov-report=term-missing
    ```
-   Expected: 50 tests, 100% success rate
+   Expected: Coverage report generated in `htmlcov/`
 
-3. **Test Exit Logic Fix Only**:
-   ```bash
-   python3 test_exit_logic_fix.py
-   ```
-   Expected: 6 tests, 100% success rate
-
-2. **Check Local System Status**:
+3. **Check Local System Status**:
    ```bash
    nightlog status
    ```
    Expected: Service running, database accessible, recent logs visible
 
-3. **Test GitHub Actions Workflow**:
+4. **Test GitHub Actions Workflow**:
    - Go to Actions tab in your GitHub repository: https://github.com/amicable-alpaca/beeminder-using-laptop-late/actions
    - Look for "Sync Night Logger Data" workflow
    - Manually trigger with "Run workflow" to test
@@ -95,79 +89,32 @@ Local Computer (HSoT) -> violations.json -> GitHub -> Beeminder (Display)
    - Wait for next scheduled sync (12 PM NYC) or trigger manually
    - Datapoint should be automatically restored
 
-## Exit Logic Fix (September 2025)
-
-### Problem Identified
-The original night logger had a critical bug where it would exit immediately after uploading existing violations, missing subsequent night usage on the same night.
-
-**Original Broken Flow**:
-1. 22:55 - Service starts
-2. 23:00:01 - Detects first night usage, uploads violations, **exits immediately**
-3. 23:00:05+ - User continues using computer but service has exited (missed data!)
-
-### Fix Implemented
-**Fixed Flow**:
-1. 22:55 - Service starts
-2. 23:00:01 - Detects first night usage, uploads violations, **continues logging**
-3. 23:00:05+ - Service continues logging all night usage
-4. 04:05 - Service stopped by timer (natural termination)
-
-### Deployment Instructions
-
-1. **Deploy the Fix**:
-   ```bash
-   # Run the deployment script
-   ./deploy_fix.sh
-   ```
-
-   The script will:
-   - Stop the current service
-   - Backup the original file
-   - Install the fixed version
-   - Restart the service
-
-2. **Verify Fix Deployment**:
-   ```bash
-   # Check that fixed version is running
-   nightlog status
-
-   # Run comprehensive tests including exit logic fix
-   python3 test_complete_with_fix.py
-   ```
-
-3. **Monitor Next Night Session**:
-   - Wait for next night usage (23:00-03:59)
-   - Check logs: `nightlog logs`
-   - Verify multiple log entries are captured instead of just one
-   - Confirm violation is properly uploaded to Beeminder
-
-### Technical Changes Made
-- Removed premature `sys.exit(0)` after successful upload
-- Added proper database connection reopening after GitHub operations
-- Enhanced `already_posted_today` guard to prevent duplicate uploads
-- Maintained one-violation-per-day guarantee
-- Added 6 comprehensive tests to verify fix behavior
-
 ## How It Works
 
 ### Daily Operation
 
 1. **Night Usage Detected** (23:00-03:59):
-   - Local computer logs usage to HSoT database
+   - Local computer logs usage to HSoT database every 60 seconds
    - On first detection, generates violations.json from HSoT
-   - Uploads violations.json to both main and violations-data branches
+   - Uploads violations.json to GitHub
    - Triggers GitHub Actions workflow
+   - **Continues logging** (service runs until 04:05 AM timer)
 
 2. **GitHub Actions Workflow**:
-   - Downloads fresh violations.json from main branch
-   - Uses selective sync: only adds/updates/deletes datapoints as needed
+   - Downloads violations.json
+   - Uses selective sync with proper pagination (fixed October 2025)
+   - Only adds/updates/deletes datapoints as needed
    - Preserves existing Beeminder data (prevents goal derailment)
-   - No database uploads - works purely with violations.json
 
 3. **Scheduled Sync** (12 PM NYC time):
    - Daily verification sync runs automatically
    - Ensures Beeminder stays in sync with violations.json
    - Handles any missed violations or corrections
+
+4. **Service Stop** (04:05 AM):
+   - Stop timer terminates service
+   - Service stays stopped (Restart=on-failure, fixed October 2025)
+   - Will restart automatically at 22:55 PM
 
 ### Tamper Resistance
 
@@ -175,7 +122,7 @@ The original night logger had a critical bug where it would exit immediately aft
 - **Data Integrity**: GitHub commit history provides audit trail
 - **Redundancy**: Multiple backup points (local HSoT, GitHub violations.json, Beeminder)
 - **Transparency**: All changes visible in public GitHub repository
-- **Race Condition Protection**: Dual branch uploads and database copy fallback
+- **Pagination**: Properly fetches all Beeminder datapoints (fixed October 2025)
 
 ## Troubleshooting
 
@@ -214,13 +161,22 @@ The original night logger had a critical bug where it would exit immediately aft
 
 ## Files Overview
 
-- `night_logger_github.py`: Tamper-resistant night logger with exit logic fix (generates violations.json and uploads to GitHub)
-- `night_logger_github_fixed_v3.py`: Latest fixed version with continuous logging behavior
-- `sync_violations.py`: GitHub Actions sync program with selective updates and Beeminder pagination
+### Core System
+- `sync_violations.py`: GitHub Actions sync program with selective updates and Beeminder pagination (fixed)
+- `night_logger_github_fixed_v3.py`: Night logger source code (for reference/development)
 - `.github/workflows/sync-violations.yml`: GitHub Actions workflow
-- `test_comprehensive.py`: Comprehensive test suite (50 tests)
-- `test_exit_logic_fix.py`: Exit logic fix tests (6 tests)
-- `test_complete_with_fix.py`: Complete test suite (56 tests, 100% success rate)
-- `deploy_fix.sh`: Deployment script for exit logic fix
+- `violations.json`: Current violations data
+
+### Testing
+- `tests/test_sync_violations.py`: Sync script tests (27 tests)
+- `tests/test_night_logger_github.py`: Night logger tests (33 tests)
+- `pytest.ini`: Test configuration
+- `.coveragerc`: Coverage configuration
+- `requirements-test.txt`: Test dependencies
+
+### Documentation
+- `README.md`: Quick start guide
+- `docs/TESTING.md`: Test documentation
+- `docs/SETUP_TAMPER_RESISTANT.md`: This setup guide
+- `docs/NIGHT_LOGGER_SYSTEM_DOCUMENTATION.md`: Technical reference
 - `.env.template`: Environment template for local setup
-- `SETUP_TAMPER_RESISTANT.md`: This setup guide

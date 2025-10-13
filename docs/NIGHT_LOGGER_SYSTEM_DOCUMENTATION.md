@@ -71,8 +71,17 @@ CREATE TABLE posts (
 - **Status**: "Night Logger (Beeminder) - Tamper Resistant"
 
 **Override Configuration**: `/etc/systemd/system/night-logger.service.d/override.conf`
-- Faster restart (5s delay) on failure
-- RuntimeMaxSec=5h20m backstop
+```ini
+[Unit]
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=on-failure
+RestartSec=30
+```
+- Only restarts on failures (not when stopped by timer)
+- 30 second restart delay
 
 **Timer Files**
 - **Start Timer**: `/etc/systemd/system/night-logger-start.timer`
@@ -140,26 +149,29 @@ CREATE TABLE posts (
 - `.github/workflows/sync-violations.yml` - GitHub Actions workflow
 
 ### Testing & Validation
-- `test_comprehensive.py` - Comprehensive test suite (50 tests)
-  - Core functionality testing
-  - GitHub/Beeminder API testing
-  - System integration testing
-  - Security and performance testing
-  - Dual branch upload testing
-  - Advanced sync features testing
-  - Database concurrency and race condition testing
-  - Error handling and edge cases
-- `test_exit_logic_fix.py` - Exit logic fix tests (6 tests)
-  - Continuous logging after upload verification
-  - One-violation-per-day guarantee testing
-  - Database connection reopening tests
-  - Service lifetime comparison tests
-- `test_complete_with_fix.py` - Complete test suite (56 tests, 100% success rate)
+- `tests/test_sync_violations.py` - Sync script tests (27 tests)
+  - BeeminderAPI class: pagination, CRUD operations, error handling
+  - ViolationsSync class: selective sync, duplicate cleanup, nuclear mode
+  - CLI: argument parsing, environment variables, error cases
+- `tests/test_night_logger_github.py` - Night logger tests (33 tests)
+  - Time helpers: hour detection, date formatting
+  - Database operations: table creation, posting logic
+  - Beeminder duplicate cleaning
+  - Violations extraction
+  - GitHub API integration
+  - Main function: keyboard interrupt, verbose mode, credentials
+- `pytest.ini` - Test configuration
+- `.coveragerc` - Coverage reporting configuration
+- `requirements-test.txt` - Test dependencies
+
+**Total: 60 tests, all passing**
 
 ### Documentation
 - `README.md` - Quick start guide and project overview
-- `SETUP_TAMPER_RESISTANT.md` - Complete deployment guide
-- `NIGHT_LOGGER_SYSTEM_DOCUMENTATION.md` - This technical reference
+- `docs/TESTING.md` - Comprehensive test documentation
+- `docs/SETUP_TAMPER_RESISTANT.md` - Complete deployment guide
+- `docs/NIGHT_LOGGER_SYSTEM_DOCUMENTATION.md` - This technical reference
+- `docs/DOCUMENTATION_STATUS.md` - Documentation update tracking
 - `.env.template` - Environment configuration template
 
 ## Security and Permissions
@@ -184,13 +196,13 @@ CREATE TABLE posts (
 
 ## Operation Flow
 
-### Daily Cycle (Fixed Behavior)
+### Daily Cycle
 1. **22:55 Daily**: Timer starts night-logger.service
-2. **23:00-03:59**: Service logs 1/0 values every 5 seconds to HSoT database
-3. **First "1" value**: Service generates violations.json from HSoT, uploads to both main and violations-data branches, triggers workflow, **CONTINUES LOGGING**
+2. **23:00-03:59**: Service logs 1/0 values every 60 seconds to HSoT database
+3. **First "1" value**: Service generates violations.json from HSoT, uploads to GitHub, triggers workflow, **CONTINUES LOGGING**
 4. **Subsequent "1" values**: Service continues logging without re-uploading (protected by `already_posted_today`)
-5. **GitHub Actions**: Downloads fresh violations.json from main branch, uses selective sync with Beeminder
-6. **04:05 Daily**: Timer stops service (natural termination)
+5. **GitHub Actions**: Downloads violations.json, uses selective sync with Beeminder (proper pagination)
+6. **04:05 Daily**: Timer stops service (stays stopped due to `Restart=on-failure`)
 7. **12:00 PM NYC**: Scheduled sync ensures data integrity
 
 ### Tamper Resistance
@@ -200,21 +212,24 @@ CREATE TABLE posts (
 - **Transparency**: All changes visible in public GitHub repository
 - **Race Condition Protection**: Dual branch uploads and database copy fallback
 
-## System Status (Current)
+## System Status (Current - October 2025)
 
 ### Active Configuration
-- **Architecture**: Tamper-resistant system fully deployed with dual branch uploads
+- **Architecture**: Tamper-resistant system fully deployed
 - **Service**: Running as "Night Logger (Beeminder) - Tamper Resistant"
-- **Database**: 20+ violations tracked across multiple posted days
+- **Database**: 29 posted days with 7,189 1-second resolution detections
 - **Schedule**: Active timers for 22:55 start, 04:05 stop
-- **Testing**: 56 tests (50 comprehensive + 6 exit logic fix), 100% success rate
+- **Testing**: 60 tests, all passing
+- **Recent Fixes**:
+  - Pagination bug fixed (now fetches all Beeminder datapoints)
+  - Service timer fix (Restart=on-failure prevents restart after stop timer)
+  - Duplicate datapoints cleaned up
 
 ### Data Statistics
-- **Total Violations**: 20+ violations tracked
-- **Posted Days**: Multiple days successfully posted
-- **Unposted Violations**: 2 pending sync
+- **Posted Days**: 29 days successfully posted
 - **Database**: SQLite with WAL mode, copy fallback for concurrent access
 - **Permissions**: Admin users have read access via nightlog-readers group
+- **Last Posted**: 2025-10-06
 
 ## Usage Examples
 
@@ -226,14 +241,15 @@ nightlog status
 # View live service logs
 nightlog logs
 
-# Test complete system (56 tests including exit logic fix, 100% success rate)
-python3 test_complete_with_fix.py
+# Run all tests (60 tests, all passing)
+pytest -v
 
-# Test comprehensive system only (50 tests)
-python3 test_comprehensive.py
+# Run with coverage report
+pytest --cov=. --cov-report=html --cov-report=term-missing
 
-# Test exit logic fix only (6 tests)
-python3 test_exit_logic_fix.py
+# Run specific test files
+pytest tests/test_sync_violations.py -v
+pytest tests/test_night_logger_github.py -v
 ```
 
 ### Manual Control
@@ -277,7 +293,7 @@ journalctl -u night-logger.service -n 20
 nightlog status
 
 # Run diagnostic tests
-python3 test_complete_with_fix.py
+pytest -v
 ```
 
 ### File Locations Quick Reference
@@ -290,13 +306,14 @@ Local System:
 /etc/systemd/system/night-logger.service # Service config
 
 Repository:
-sync_violations.py                       # Sync program (selective)
+sync_violations.py                       # Sync program (selective, with pagination fix)
 .github/workflows/sync-violations.yml    # GitHub Actions
-test_comprehensive.py                    # Comprehensive test suite (50 tests)
-test_exit_logic_fix.py                   # Exit logic fix tests (6 tests)
-test_complete_with_fix.py                # Complete test suite (56 tests, 100% success)
-night_logger_github_fixed_v3.py          # Latest fixed version with continuous logging
-deploy_fix.sh                            # Deployment script for fixed version
+tests/test_sync_violations.py            # Sync script tests (27 tests)
+tests/test_night_logger_github.py        # Night logger tests (33 tests)
+night_logger_github_fixed_v3.py          # Night logger source (for reference)
+pytest.ini                               # Test configuration
+.coveragerc                              # Coverage configuration
+requirements-test.txt                    # Test dependencies
 violations.json                          # Current violations data
 ```
 

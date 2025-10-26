@@ -207,8 +207,29 @@
       "date": "2025-10-19",
       "timestamp": "2025-10-20T03:00:14.763Z",
       "value": 1,
-      "comment": "Night logger violation (1 detections)",
+      "comment": "Night logger violation (60 detections)",
       "daystamp": "20251019"
+    },
+    {
+      "date": "2025-10-21",
+      "timestamp": "2025-10-22T03:13:46.830Z",
+      "value": 1,
+      "comment": "Night logger violation (34 detections)",
+      "daystamp": "20251021"
+    },
+    {
+      "date": "2025-10-22",
+      "timestamp": "2025-10-23T03:49:08.734Z",
+      "value": 1,
+      "comment": "Night logger violation (12 detections)",
+      "daystamp": "20251022"
+    },
+    {
+      "date": "2025-10-25",
+      "timestamp": "2025-10-26T03:00:06.777Z",
+      "value": 1,
+      "comment": "Night logger violation (1 detections)",
+      "daystamp": "20251025"
     }
   ],
   "posted_dates": [
@@ -242,9 +263,12 @@
     "2025-10-04",
     "2025-10-06",
     "2025-10-15",
-    "2025-10-19"
+    "2025-10-19",
+    "2025-10-21",
+    "2025-10-22",
+    "2025-10-25"
   ],
-  "last_updated": "2025-10-20T03:00:14.924000Z",
-  "total_violations": 30,
+  "last_updated": "2025-10-26T03:00:06.994665Z",
+  "total_violations": 33,
   "unposted_violations": []
 }

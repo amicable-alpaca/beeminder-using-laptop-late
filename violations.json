@@ -335,6 +335,20 @@
       "value": 1,
       "comment": "Night logger violation (160 detections)",
       "daystamp": "20251213"
+    },
+    {
+      "date": "2025-12-16",
+      "timestamp": "2025-12-16T04:00:09.568Z",
+      "value": 1,
+      "comment": "Night logger violation (69 detections)",
+      "daystamp": "20251216"
+    },
+    {
+      "date": "2025-12-17",
+      "timestamp": "2025-12-17T04:05:15.598Z",
+      "value": 1,
+      "comment": "Night logger violation (180 detections)",
+      "daystamp": "20251217"
     }
   ],
   "posted_dates": [
@@ -397,9 +411,11 @@
     "2025-12-11",
     "2025-12-12",
     "2025-12-13",
-    "2025-12-15"
+    "2025-12-15",
+    "2025-12-16",
+    "2025-12-17"
   ],
-  "last_updated": "2025-12-16T04:00:09.972980Z",
-  "total_violations": 48,
+  "last_updated": "2025-12-18T04:00:03.597077Z",
+  "total_violations": 50,
   "unposted_violations": []
 }

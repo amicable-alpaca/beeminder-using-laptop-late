@@ -356,6 +356,118 @@
       "value": 1,
       "comment": "Night logger violation (210 detections)",
       "daystamp": "20251218"
+    },
+    {
+      "date": "2025-12-19",
+      "timestamp": "2025-12-19T04:00:00.882Z",
+      "value": 1,
+      "comment": "Night logger violation (88 detections)",
+      "daystamp": "20251219"
+    },
+    {
+      "date": "2025-12-20",
+      "timestamp": "2025-12-20T04:39:55.534Z",
+      "value": 1,
+      "comment": "Night logger violation (15 detections)",
+      "daystamp": "20251220"
+    },
+    {
+      "date": "2025-12-23",
+      "timestamp": "2025-12-23T04:00:00.927Z",
+      "value": 1,
+      "comment": "Night logger violation (66 detections)",
+      "daystamp": "20251223"
+    },
+    {
+      "date": "2025-12-24",
+      "timestamp": "2025-12-24T04:12:28.585Z",
+      "value": 1,
+      "comment": "Night logger violation (25 detections)",
+      "daystamp": "20251224"
+    },
+    {
+      "date": "2025-12-25",
+      "timestamp": "2025-12-25T08:47:50.553Z",
+      "value": 1,
+      "comment": "Night logger violation (6 detections)",
+      "daystamp": "20251225"
+    },
+    {
+      "date": "2025-12-26",
+      "timestamp": "2025-12-26T04:50:15.602Z",
+      "value": 1,
+      "comment": "Night logger violation (7 detections)",
+      "daystamp": "20251226"
+    },
+    {
+      "date": "2025-12-27",
+      "timestamp": "2025-12-27T04:00:01.309Z",
+      "value": 1,
+      "comment": "Night logger violation (76 detections)",
+      "daystamp": "20251227"
+    },
+    {
+      "date": "2025-12-30",
+      "timestamp": "2025-12-30T04:00:01.137Z",
+      "value": 1,
+      "comment": "Night logger violation (12 detections)",
+      "daystamp": "20251230"
+    },
+    {
+      "date": "2025-12-31",
+      "timestamp": "2025-12-31T04:00:01.210Z",
+      "value": 1,
+      "comment": "Night logger violation (26 detections)",
+      "daystamp": "20251231"
+    },
+    {
+      "date": "2026-01-05",
+      "timestamp": "2026-01-05T05:20:52.645Z",
+      "value": 1,
+      "comment": "Night logger violation (12 detections)",
+      "daystamp": "20260105"
+    },
+    {
+      "date": "2026-01-08",
+      "timestamp": "2026-01-08T04:00:01.152Z",
+      "value": 1,
+      "comment": "Night logger violation (62 detections)",
+      "daystamp": "20260108"
+    },
+    {
+      "date": "2026-01-09",
+      "timestamp": "2026-01-09T04:17:15.570Z",
+      "value": 1,
+      "comment": "Night logger violation (168 detections)",
+      "daystamp": "20260109"
+    },
+    {
+      "date": "2026-01-10",
+      "timestamp": "2026-01-10T04:00:01.279Z",
+      "value": 1,
+      "comment": "Night logger violation (149 detections)",
+      "daystamp": "20260110"
+    },
+    {
+      "date": "2026-01-11",
+      "timestamp": "2026-01-11T04:00:34.165Z",
+      "value": 1,
+      "comment": "Night logger violation (98 detections)",
+      "daystamp": "20260111"
+    },
+    {
+      "date": "2026-01-12",
+      "timestamp": "2026-01-12T04:10:32.631Z",
+      "value": 1,
+      "comment": "Night logger violation (243 detections)",
+      "daystamp": "20260112"
+    },
+    {
+      "date": "2026-01-15",
+      "timestamp": "2026-01-15T04:32:09.691Z",
+      "value": 1,
+      "comment": "Night logger violation (107 detections)",
+      "daystamp": "20260115"
     }
   ],
   "posted_dates": [
@@ -421,9 +533,30 @@
     "2025-12-15",
     "2025-12-16",
     "2025-12-17",
-    "2025-12-18"
+    "2025-12-18",
+    "2025-12-19",
+    "2025-12-20",
+    "2025-12-22",
+    "2025-12-23",
+    "2025-12-24",
+    "2025-12-25",
+    "2025-12-26",
+    "2025-12-27",
+    "2025-12-29",
+    "2025-12-30",
+    "2025-12-31",
+    "2026-01-04",
+    "2026-01-05",
+    "2026-01-07",
+    "2026-01-08",
+    "2026-01-09",
+    "2026-01-10",
+    "2026-01-11",
+    "2026-01-12",
+    "2026-01-14",
+    "2026-01-15"
   ],
-  "last_updated": "2025-12-19T04:00:01.236989Z",
-  "total_violations": 51,
+  "last_updated": "2026-01-16T04:57:25.818801Z",
+  "total_violations": 67,
   "unposted_violations": []
 }

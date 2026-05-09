@@ -1110,8 +1110,15 @@
       "date": "2026-05-07",
       "timestamp": "2026-05-08T03:23:39.090Z",
       "value": 1,
-      "comment": "Night logger violation (1 detections)",
+      "comment": "Night logger violation (37 detections)",
       "daystamp": "20260507"
+    },
+    {
+      "date": "2026-05-08",
+      "timestamp": "2026-05-08T04:00:56.799Z",
+      "value": 1,
+      "comment": "Night logger violation (25 detections)",
+      "daystamp": "20260508"
     }
   ],
   "posted_dates": [
@@ -1295,9 +1302,10 @@
     "2026-05-04",
     "2026-05-05",
     "2026-05-06",
-    "2026-05-07"
+    "2026-05-07",
+    "2026-05-08"
   ],
-  "last_updated": "2026-05-08T03:23:42.347871Z",
-  "total_violations": 159,
+  "last_updated": "2026-05-09T03:00:19.651892Z",
+  "total_violations": 160,
   "unposted_violations": []
 }

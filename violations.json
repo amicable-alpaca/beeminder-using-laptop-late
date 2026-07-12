@@ -1427,6 +1427,13 @@
       "value": 1,
       "comment": "Night logger violation (125 detections)",
       "daystamp": "20260710"
+    },
+    {
+      "date": "2026-07-11",
+      "timestamp": "2026-07-11T04:48:00.289Z",
+      "value": 1,
+      "comment": "Night logger violation (13 detections)",
+      "daystamp": "20260711"
     }
   ],
   "posted_dates": [
@@ -1658,9 +1665,10 @@
     "2026-07-07",
     "2026-07-08",
     "2026-07-09",
-    "2026-07-10"
+    "2026-07-10",
+    "2026-07-11"
   ],
-  "last_updated": "2026-07-11T04:48:05.619780Z",
-  "total_violations": 204,
+  "last_updated": "2026-07-12T03:00:11.710174Z",
+  "total_violations": 205,
   "unposted_violations": []
 }
